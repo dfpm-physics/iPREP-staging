@@ -1,0 +1,2501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js 'sha256-ImJZjOZcLvrdncIpcZeo0bB6Ag3eOQCgsCzusywtang=' 'sha256-O1yQJpi2tk+FUEfwpxi0rUB9mwFk14n/BCfN/1plBv8='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://wkibeptktbnaddfynrwr.supabase.co https://dfpm-physics.github.io; connect-src 'self' https://wkibeptktbnaddfynrwr.supabase.co wss://wkibeptktbnaddfynrwr.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Course administration · PREP</title>
+  <script>(function(){try{var s=localStorage.getItem('cp.theme');var m=s||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(m==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <link rel="stylesheet" href="../css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O" crossorigin="anonymous"></script>
+  <script src="../js/config.js"></script>
+</head>
+<body>
+  <header id="topnav"></header><script src="../js/nav-shell.js"></script>
+  <main class="page-wide" id="main">
+    <div class="center-load"><span class="spinner"></span><span>Loading…</span></div>
+  </main>
+
+  <!-- Generic modal — body swapped per action, following the established pattern (there is no
+       shared UI module; grade.html does the same). -->
+  <div class="modal-backdrop" id="mk-modal">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-head"><h2 id="mk-title"></h2><button class="modal-close" data-close>×</button></div>
+      <div id="mk-body"></div>
+      <div class="error-msg" id="mk-error" style="min-height:1em"></div>
+      <div class="row" style="gap:10px">
+        <button class="btn btn-primary" id="mk-ok"></button>
+        <button class="btn btn-secondary" data-close>Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Move a student between sections. Its own modal rather than the generic one because it
+       carries a <select> that has to be populated before it opens. -->
+  <div class="modal-backdrop" id="sec-modal">
+    <div class="modal" style="max-width:380px">
+      <div class="modal-head"><h2>Change section</h2><button class="modal-close" data-close>×</button></div>
+      <p class="muted" style="font-size:0.88em;margin-bottom:14px" id="sm-name"></p>
+      <div class="field"><label for="sm-select">Section</label><select id="sm-select"></select></div>
+      <div class="field-hint">Their work moves with them — submissions and grades hang off the
+        enrollment row, not off the section.</div>
+      <div class="error-msg" id="sm-error" style="min-height:1em"></div>
+      <div class="row" style="gap:10px;margin-top:8px">
+        <button class="btn btn-primary" id="sm-save">Save</button>
+        <button class="btn btn-secondary" data-close>Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add one cadet (faculty beta, 2026-07-27). Its own modal rather than the generic one for the
+       same reason the section-move modal is: it carries selects that have to be populated before
+       it opens, and a live search whose results are wired after each keystroke. -->
+  <div class="modal-backdrop" id="add-stu-modal">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-head"><h2>Add a student</h2><button class="modal-close" data-close>×</button></div>
+
+      <div class="field"><label for="as-search">Already in PREP?</label>
+        <input id="as-search" type="search" autocomplete="off"
+               placeholder="Search by name or cadet ID…">
+        <div class="field-hint">Finds cadets from your other courses. Picking one enrolls the
+          record they already have — it never creates a second one.</div>
+        <div id="as-results" class="pick-list" hidden></div>
+      </div>
+
+      <div id="as-picked" class="alert alert-info" style="display:none"></div>
+
+      <div class="form-grid" style="--fg-min:150px">
+        <div class="field"><label for="as-sid">Cadet ID</label>
+          <input id="as-sid" type="text" inputmode="numeric" placeholder="3000990009"></div>
+        <div class="field"><label for="as-nm">Full name</label>
+          <input id="as-nm" type="text" placeholder="Jane Doe"></div>
+        <div class="field"><label for="as-em">Email</label>
+          <input id="as-em" type="email" placeholder="jane.doe@afacademy.af.edu">
+          <div class="field-hint">Their sign-in address. Without one they cannot be given a login.</div></div>
+        <div class="field"><label for="as-sq">Squadron</label>
+          <input id="as-sq" type="text" placeholder="CS-01"></div>
+        <div class="field"><label for="as-sec">Section</label><select id="as-sec"></select></div>
+      </div>
+
+      <div class="error-msg" id="as-error" style="min-height:1em"></div>
+      <div class="row" style="gap:10px;margin-top:8px">
+        <button class="btn btn-primary" id="as-save">Add to this course</button>
+        <button class="btn btn-secondary" data-close>Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reset a cadet to the default password. -->
+  <div class="modal-backdrop" id="pw-modal">
+    <div class="modal" style="max-width:440px">
+      <div class="modal-head"><h2>Reset password</h2><button class="modal-close" data-close>×</button></div>
+      <p id="pwm-name" style="font-weight:600;margin-bottom:6px"></p>
+      <p class="muted" style="font-size:0.88em;margin-bottom:14px">
+        This sets their password back to the <strong>default</strong> — the last 6 digits of their
+        cadet ID. They will be required to choose a new one the next time they sign in.
+        You cannot set a specific password, and you will not be shown theirs.</p>
+      <div class="error-msg" id="pwm-error" style="min-height:1em"></div>
+      <div class="row" style="gap:10px;margin-top:8px">
+        <button class="btn btn-primary" id="pwm-confirm">Reset to default</button>
+        <button class="btn btn-secondary" data-close>Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Revoke an extension. Its own modal rather than the generic one because a reason is
+       REQUIRED (migration 007) and the field has to be cleared and re-validated per open. -->
+  <div class="modal-backdrop" id="revoke-modal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-head"><h2>Revoke extension</h2><button class="modal-close" data-close>×</button></div>
+      <p class="muted" style="font-size:0.88em;margin-bottom:14px" id="revoke-who"></p>
+      <div class="field"><label for="revoke-reason">Reason <span class="req">required</span></label>
+        <input type="text" id="revoke-reason" maxlength="200"
+               placeholder="e.g. Discussed with the instructor; not a documented absence.">
+        <div class="field-hint">The extension stays on this report, marked revoked, with your name on it.</div>
+      </div>
+      <div class="error-msg" id="revoke-error" style="min-height:1em"></div>
+      <div class="row" style="gap:10px;margin-top:8px">
+        <button class="btn btn-primary" id="revoke-save">Revoke</button>
+        <button class="btn btn-secondary" data-close>Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <input type="file" id="csv-file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" style="display:none">
+  <input type="file" id="bb-file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" multiple style="display:none">
+
+  <script type="module">
+    import { bootstrap } from '../js/auth.js';
+    import { renderNav } from '../js/nav.js';
+    import { initTheme } from '../js/theme.js';
+    import { esc, lastFirst, fmtDate, fmtDateTime, runPage, showFatal, triggerDownload, wireModalDismiss } from '../js/util.js';
+    import { allSectionIds, courseExtensions, revokeExtension, reinstateExtension,
+             loadPublishPlan, applyPublishPlan, summarizePublishPlan, PUBLISH_HOLDS }
+      from '../js/faculty-grade.js';
+    import * as A from '../js/faculty-admin.js';
+    import * as R from '../js/faculty-roster.js';
+    import * as RI from '../js/roster-import.js';
+    import * as CD from '../js/course-days.js';
+    import { db } from '../js/supabase.js';
+    import * as BB from '../js/blackboard-fill.js';
+
+    /* ── One page, four tabs: Students · Staff · Extensions · Export ─────────────
+     * The Students tab was two separate pages for a few hours on 2026-07-23 (`roster.html` and
+     * `enrollment.html`, roadmap P1.9) before the director called it: they are one job, and
+     * splitting them put two more entries in the nav bar to do it. Both pages are gone; everything
+     * they held lives here, which is where a director looking at staffing and export already was.
+     *
+     * EXTENSIONS ARRIVED THE SAME WAY on 2026-07-30, off the nav bar and out of its own page.
+     * `extensions.html` is now a redirect into this tab, so it is still one URL a director can
+     * bookmark — what it stopped being is a fifth thing on a bar whose other entries are the
+     * places teaching happens. See `nav.js` FACULTY_LINKS.
+     *
+     * `?tab=` deep-links a tab, which is what makes that redirect possible and costs one line.
+     * It is read once, at load; switching tabs afterwards does not rewrite the URL, because a
+     * back button that walks a director through four panels is not what anyone wanted.
+     *
+     * The whole page stays director-gated, as it has been. Note that `reset-student-password`
+     * itself admits ANY staff member of the offering — the help doc has said so since 2026-07-21 —
+     * but no UI has ever offered it to an instructor, because the only page carrying the button was
+     * always director-only. That gap predates this merge and is recorded rather than quietly
+     * widened; exposing it means giving instructors a read-only view of this tab, which is a
+     * deliberate decision and not one to make in passing.
+     */
+    const TABS = ['students', 'staff', 'extensions', 'export'];
+    const wantedTab = new URLSearchParams(location.search).get('tab');
+    let tab = TABS.includes(wantedTab) ? wantedTab : 'students';
+    let cache = null;                       // last loadStaff() result, for the modals
+    let onConfirm = null;                   // active modal's confirm handler
+
+    // Extensions tab state.
+    let extRows = [];             // every extension in the offering, revoked ones included
+    let revokeId = null;          // the row the revoke modal is about
+
+    // Students tab state.
+    let staged = null;            // the import, between preview and commit
+    let pwTarget = null;          // { studentId, name } for the reset modal
+    let offeringSections = [];    // [{ id (uuid), code, meeting_days, period }]
+    let courseDays = { days: [...CD.DEFAULT_DAYS], assumed: true, error: null };   // this course's own list of meeting days
+    let editSid = null;           // enrollment id being moved
+    let roster = [];              // active enrollments, filtered client-side by the search box
+    let droppedRoster = [];       // enrollments marked dropped — kept, but no longer in the course
+    let query = '';
+    let addPicked = null;         // the existing cadet chosen in the add-student modal, if any
+    let addSearchTimer = null;    // debounce for that modal's live search
+
+    const ctx = await bootstrap({ require: 'faculty' });
+    const isAdmin = () => !!ctx?.instructorRow?.is_global_admin;
+
+    // runPage defers init through a microtask, so the whole module body — including the state
+    // above — is initialized before anything reads it, and any throw lands in showFatal instead
+    // of leaving the spinner up forever. Do not call init() directly here.
+    runPage(ctx, init);
+
+    function init() {
+      initTheme();
+      renderNav(ctx, { active: 'admin', onCourseChange: () => {
+        cache = null; staged = null; roster = []; query = '';
+        render().catch(showFatal);
+      } });
+      wireModal();
+      wireSecModal();
+      wirePwModal();
+      wireAddStudentModal();
+      wireRevokeModal();
+      // Cross-tab links inside a panel ("…is the Students tab") switch rather than navigate.
+      // Delegated on #main, wired ONCE here rather than inside render(): render() replaces the
+      // panel beneath this element on every tab change but not the element itself, so re-attaching
+      // there would stack a fresh handler per render and re-render N times on the Nth click.
+      document.getElementById('main').addEventListener('click', (e) => {
+        const link = e.target.closest('[data-goto-tab]');
+        if (!link) return;
+        e.preventDefault();
+        tab = link.dataset.gotoTab;
+        render().catch(showFatal);
+      });
+      document.getElementById('csv-file').addEventListener('change', (e) => {
+        const f = e.target.files[0]; if (f) readCsv(f);
+      });
+      return render();
+    }
+
+    async function render() {
+      const root = document.getElementById('main');
+
+      // The nav already hides this page from instructors; this is the direct-URL case. It is a
+      // UX boundary, not a security one — RLS and the edge functions are what actually enforce.
+      if (!ctx.isDirectorForCurrent()) {
+        root.innerHTML = `<div class="page-head"><h1>Course administration</h1></div>
+          <div class="alert alert-info">Course administration is available to course directors and
+          system admins. You can grade your assigned sections from <a href="grade.html">Grade</a>.</div>`;
+        return;
+      }
+
+      root.innerHTML = `
+        <div class="page-head"><h1>Course administration</h1>
+          <div class="sub">${esc(ctx.courseTitleOf(ctx.currentOffering))}${
+            ctx.currentTermLabel ? ' · ' + esc(ctx.currentTermLabel) : ''} — this offering, the cadets in it,
+            and the people who run it.${ctx.courses?.find(c => c.offeringId === ctx.currentOffering)?.isActive === false
+              ? ' <span class="score-badge pending" id="inactive-badge">Inactive term</span> You can still import its roster: nothing here depends on the term being active.' : ''}</div></div>
+        <div class="subtabs">
+          <button class="subtab ${tab === 'students' ? 'active' : ''}" data-tab="students">Students</button>
+          <button class="subtab ${tab === 'staff' ? 'active' : ''}" data-tab="staff">Staff</button>
+          <button class="subtab ${tab === 'extensions' ? 'active' : ''}" data-tab="extensions">Extensions</button>
+          <button class="subtab ${tab === 'export' ? 'active' : ''}" data-tab="export">Export</button>
+          <a class="subtab" id="scale-link" href="scale.html" title="The course's letter scale, on its own page">Letter scale</a>
+        </div>
+        <div id="panel"><div class="center-load"><span class="spinner"></span><span>Loading…</span></div></div>`;
+
+      root.querySelectorAll('[data-tab]').forEach(b =>
+        b.addEventListener('click', () => {
+          tab = b.dataset.tab;
+          // A staged-but-uncommitted import does not survive leaving the tab. That is deliberate:
+          // the preview was computed against a roster that may have moved underneath it, and
+          // silently committing a stale reconciliation is the one outcome the preview exists to
+          // prevent (djGradebookProject's importer abandons on navigation for the same reason).
+          if (tab !== 'students') staged = null;
+          render().catch(showFatal);
+        }));
+
+      if (tab === 'students') await renderStudents();
+      else if (tab === 'staff') await renderStaff();
+      else if (tab === 'extensions') await renderExtensions();
+      else await renderExport();
+    }
+
+    /* ═══════════════════════════ Students ═══════════════════════════
+     * Looking a cadet up, and everything that changes who is enrolled, on one tab.
+     *
+     * The import is FIRST, at the course director's request (2026-08-11). It was below the roster
+     * table until then, on the reasoning that looking somebody up is the frequent action and a
+     * destructive bulk import should not sit at the top of a page you open twenty times a term.
+     * That reasoning is not wrong, and what protects against it is that the import is still behind
+     * a collapsed <details> — the thing at the top of the page is a summary line, not a dropzone,
+     * and nothing is written without the preview-and-review step either way.
+     */
+    async function renderStudents() {
+      const panel = document.getElementById('panel');
+      const { students, dropped, sections, total, unprovisioned } = await R.loadRoster(ctx);
+      offeringSections = sections;
+      roster = students;
+      droppedRoster = dropped || [];
+
+      panel.innerHTML = `
+        <details class="card imp-card" id="imp"${total ? '' : ' open'}>
+          <summary><strong>Import the registrar's roster</strong>
+            <span class="muted" style="font-size:0.85em">— adds and updates cadets in bulk</span></summary>
+          <div class="card-meta" style="margin-top:10px">The registrar's export, saved as
+            <strong>CSV</strong> or tab-separated text. It must include <code>Cadet EMPLID</code>,
+            <code>Cadet Name</code>, <code>Email</code>, and <code>Section</code>;
+            <code>Cadet Squadron</code>, Term, Subject, Course Number, <code>Major 1</code>,
+            <code>Major 2</code>, <code>Major 3</code>, Sex, and Advisor Name are picked up when
+            present and skipped when they are not. The check that follows sorts every row by what you
+            can do about it: <strong>sections to create</strong> (one button), <strong>rows that stay out</strong>
+            because of a problem in the row, and <strong>rows for another course or term</strong>, which stay out
+            unless you say a row does belong here. You review anything that would change an existing record
+            before it is written. A first import into an empty course is expected to start by creating its sections.</div>
+          <div class="dropzone" id="dropzone">
+            <div class="dz-ic">📄</div><div><strong>Choose a file</strong> or drag &amp; drop it here</div>
+          </div>
+          <details class="paste-box" id="paste-box" style="margin-top:10px">
+            <summary class="muted" style="cursor:pointer;font-size:0.9em">Or paste the rows here</summary>
+            <textarea id="paste-text" rows="6" style="width:100%;margin-top:8px;font-family:monospace"
+                      aria-label="Pasted roster rows, with a header line"
+                      placeholder="Cadet EMPLID,Cadet Name,Email,Section&#10;(first line is the column names)"></textarea>
+            <div style="margin-top:6px"><button class="btn btn-secondary btn-sm" id="paste-check">Check these rows</button></div>
+          </details>
+          <div class="muted" style="font-size:0.85em;margin-top:8px">Nothing is written until you click
+            the import button in the list that follows. A section name can be anything the course
+            uses (<code>M1A</code>, <code>LAB-3</code>, <code>Sec 4</code>); a course with no M and T days
+            can name sections freely. A cadet who already has an account from another term or course
+            is enrolled here with the same account.</div>
+          <div id="csv-preview" style="display:none;margin-top:16px"></div>
+        </details>
+
+        <div class="card">
+          <div class="form-grid" style="--fg-min:220px">
+            <div class="field">
+              <label for="q">Find a cadet</label>
+              <input id="q" type="search" placeholder="Name, cadet ID, squadron or section"
+                     autocomplete="off" value="${esc(query)}">
+            </div>
+            <div class="field-action"><button class="btn btn-secondary btn-sm" id="add-stu-btn">+ Add student</button></div>
+            <div class="field-action" id="prov-box"></div>
+          </div>
+          <div id="prov-result" style="font-size:0.85em;margin-top:8px"></div>
+          <div id="roster-table"></div>
+        </div>`;
+
+      document.getElementById('q').addEventListener('input', (e) => {
+        query = e.target.value; renderRosterTable();
+      });
+      document.getElementById('add-stu-btn').addEventListener('click', openAddStudent);
+
+      const dz = document.getElementById('dropzone');
+      dz.addEventListener('click', () => document.getElementById('csv-file').click());
+      dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('drag-over'); });
+      dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+      dz.addEventListener('drop', (e) => {
+        e.preventDefault(); dz.classList.remove('drag-over');
+        const f = e.dataTransfer.files[0]; if (f) readCsv(f);
+      });
+
+      document.getElementById('paste-check').addEventListener('click', async () => {
+        const t = document.getElementById('paste-text').value;
+        if (!t.trim()) { showImportError(['Paste the rows first: a header line with the column names, then one line per cadet.']); return; }
+        await previewImport(t, 'pasted rows');
+      });
+
+      renderProvision(total, unprovisioned);
+      renderRosterTable();
+      if (staged) { document.getElementById('imp').open = true; renderPreview(); }
+    }
+
+    function renderProvision(total, unprovisioned) {
+      const box = document.getElementById('prov-box');
+      box.innerHTML = unprovisioned > 0
+        ? `<div class="row" style="gap:10px;align-items:center">
+             <span class="muted" style="font-size:0.9em">${unprovisioned} of ${total} need logins.</span>
+             <button class="btn btn-primary btn-sm" id="prov-btn">Provision ${unprovisioned} account${unprovisioned !== 1 ? 's' : ''}</button>
+           </div>`
+        : total > 0 ? `<span class="muted" style="font-size:0.9em">✓ All ${total} students have logins.</span>`
+        : `<span class="muted" style="font-size:0.9em">Import a roster to create student accounts.</span>`;
+      document.getElementById('prov-btn')?.addEventListener('click', doProvision);
+    }
+
+    /** Substring match across the four things people actually search by. */
+    function matches(s, q) {
+      if (!q) return true;
+      const hay = `${s.name} ${s.student_id} ${s.squadron || ''} ${s.section_code}`.toLowerCase();
+      return q.toLowerCase().split(/\s+/).filter(Boolean).every(t => hay.includes(t));
+    }
+
+    function renderRosterTable() {
+      const host = document.getElementById('roster-table');
+      if (!host) return;
+      if (!roster.length) {
+        host.innerHTML = `<div class="empty-state" style="margin-top:14px"><div class="es-ic">🧑‍🎓</div>
+          <h3>Nobody enrolled yet</h3><p>Import the registrar's export above to get started.</p></div>
+          ${droppedHTML()}`;
+        // The drawer can be the only thing on screen — a roster every one of whose cadets was
+        // removed still needs its Re-enroll buttons to work.
+        wireRestore(host);
+        return;
+      }
+      const list = roster.filter(s => matches(s, query));
+      host.innerHTML = `
+        <div class="muted" style="font-size:0.85em;margin:14px 0 6px">${
+          list.length === roster.length
+            ? `${roster.length} student${roster.length === 1 ? '' : 's'} enrolled`
+            : `${list.length} of ${roster.length} students`}</div>
+        ${list.length ? `<div class="table-wrap"><table>
+          <thead><tr><th>Student ID</th><th>Name</th><th>Email</th><th>Sqdn</th><th>Section</th><th style="text-align:center">Auth</th><th></th></tr></thead>
+          <tbody>${list.map(s => `<tr>
+            <td>${s.student_id}</td>
+            <td><a href="student.html?e=${encodeURIComponent(s.enrollment_id)}">${esc(lastFirst(s.name))}</a></td>
+            <td class="muted" style="font-size:0.9em">${s.email ? esc(s.email) : '<span title="No address on file — this cadet predates the registrar import.">—</span>'}</td>
+            <td>${esc(s.squadron || '—')}</td>
+            <td>${esc(s.section_code)}</td>
+            <td style="text-align:center" class="${s.auth_user_id ? 'auth-yes' : 'auth-no'}">${s.auth_user_id ? '✓' : '—'}</td>
+            <td style="white-space:nowrap;text-align:right">
+              <button class="btn btn-ghost btn-sm" data-edit="${esc(s.enrollment_id)}" data-name="${esc(lastFirst(s.name))}" data-section="${esc(s.section_id)}">Move</button>
+              ${s.auth_user_id ? `<button class="btn btn-ghost btn-sm" data-pwreset="${esc(s.student_id)}" data-name="${esc(lastFirst(s.name))}">Reset password</button>` : ''}
+              <button class="btn btn-ghost btn-sm" style="color:var(--red)" data-remove="${esc(s.enrollment_id)}" data-name="${esc(lastFirst(s.name))}" data-sid="${esc(s.student_id)}">Remove</button>
+            </td></tr>`).join('')}</tbody></table></div>`
+          : `<div class="muted">Nobody matches “${esc(query)}”.</div>`}
+        ${droppedHTML()}`;
+
+      host.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => openSecModal(b.dataset.edit, b.dataset.name, b.dataset.section)));
+      host.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => doRemove(b.dataset.remove, b.dataset.name, b.dataset.sid)));
+      host.querySelectorAll('[data-pwreset]').forEach(b => b.addEventListener('click', () => openPwModal(b.dataset.pwreset, b.dataset.name)));
+      wireRestore(host);
+    }
+
+    function wireRestore(host) {
+      host.querySelectorAll('[data-restore]').forEach(b =>
+        b.addEventListener('click', () => doRestore(b.dataset.restore, b.dataset.name)));
+    }
+
+    /* Cadets whose enrollment is `dropped` — removed from the course, but not deleted.
+     *
+     * A drawer rather than a row in the table above, because they are not enrolled and listing
+     * them as though they were is exactly the bug this page had before 2026-07-28: `loadRoster()`
+     * ignored `status` while every other reader in the app filters on it, so a dropped cadet
+     * showed on the roster and nowhere else. Kept visible at all rather than hidden entirely
+     * because "who did the import take out, and can I undo it" is a question a director will have
+     * about five minutes after their first import that removes somebody. */
+    function droppedHTML() {
+      if (!droppedRoster.length) return '';
+      return `<details style="margin-top:14px">
+        <summary class="muted" style="cursor:pointer;font-size:0.88em">
+          ${droppedRoster.length} removed from this course — records and work kept</summary>
+        <div class="table-wrap" style="margin-top:8px"><table>
+          <thead><tr><th>Student ID</th><th>Name</th><th>Section</th><th></th></tr></thead>
+          <tbody>${droppedRoster.map(s => `<tr>
+            <td>${s.student_id}</td>
+            <td>${esc(lastFirst(s.name))}</td>
+            <td>${esc(s.section_code)}</td>
+            <td style="text-align:right"><button class="btn btn-ghost btn-sm"
+                  data-restore="${esc(s.enrollment_id)}"
+                  data-name="${esc(lastFirst(s.name))}">Re-enroll</button></td>
+          </tr>`).join('')}</tbody></table></div>
+        <div class="muted" style="font-size:0.85em;margin-top:8px">A cadet named again in a future
+          roster import is re-enrolled automatically.</div>
+      </details>`;
+    }
+
+    async function doRestore(enrollmentId, name) {
+      const { error } = await R.reactivateEnrollments([enrollmentId]);
+      if (error) { alert(`Could not re-enroll ${name}: ${error.message}`); return; }
+      renderStudents();
+    }
+
+    /* ── Import: read → preview → review → commit ──────────────────────────────
+     * Nothing is written until the operator clicks through the preview. That is not just
+     * politeness: the file may cover several courses, may name sections that do not exist,
+     * and may carry stale details for cadets we already hold. Each of those is a decision,
+     * and the only place to make it is in front of the data.
+     *
+     * An .xlsx dropped here cannot be read — parsing the zip+XML would mean shipping a
+     * spreadsheet library, and CORE.md §2 forbids adding a build step or a runtime
+     * dependency to the site. Detected by signature and explained, rather than parsed into
+     * nonsense.
+     */
+    function readCsv(file) {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        const text = e.target.result;
+        if (/^PK\x03\x04/.test(text.slice(0, 4))) {
+          showImportError([
+            'That looks like an Excel workbook (.xlsx), which this page cannot read.',
+            'In Excel: File → Save As → CSV UTF-8 (Comma delimited), then upload that file.',
+          ]);
+          return;
+        }
+        await previewImport(text, file.name);
+      };
+      reader.readAsText(file);
+    }
+
+    function showImportError(lines) {
+      const box = document.getElementById('csv-preview');
+      box.style.display = '';
+      box.innerHTML = `<div class="alert alert-error">
+          ${lines.map(l => `<div>${esc(l)}</div>`).join('')}
+        </div>
+        <button class="btn btn-secondary" id="csv-cancel">Close</button>`;
+      document.getElementById('csv-cancel').onclick = clearImport;
+    }
+
+    function clearImport() {
+      staged = null;
+      const box = document.getElementById('csv-preview');
+      if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+      const f = document.getElementById('csv-file'); if (f) f.value = '';
+    }
+
+    /**
+     * Parse, reconcile and stage a file for review.
+     *
+     * `carry` is what survives a RE-PARSE, and it exists because two controls in the preview
+     * re-run this on the same file: "create these sections" and "include these rows". Re-parsing
+     * rather than patching staged rows is deliberate (one code path, one set of checks), but it
+     * would otherwise throw away every decision the operator had already made further down the
+     * page — the conflict resolutions and the departures they had un-ticked. Losing thirty
+     * decisions to a tick at the top is the kind of thing nobody reports and everybody works
+     * around, so the decisions are carried across by student id and enrollment id.
+     */
+    async function previewImport(text, filename, carry = {}) {
+      courseDays = await CD.loadCourseDays(db, ctx.currentCourse);
+      const approved = carry.approved instanceof Set ? carry.approved : new Set();
+      /* ALWAYS pass the section map, even when it is EMPTY (director, 2026-07-28).
+       *
+       * This used to send `null` when the offering had no sections, which turns the parser's
+       * unknown-section check off entirely — and it did that in precisely the case the check
+       * exists for. The result was a closed loop with no way out of it: every row parsed clean
+       * against a section that does not exist, `unknownSections` came back empty so the preview
+       * never offered to create any, and then commitRoster() refused the whole import with
+       * "Create them first, then re-run" — pointing at a Sections screen that, since the P1.10
+       * merge, only told the director to import a roster. A brand-new course could not be
+       * populated at all.
+       *
+       * An empty object is truthy, so the check runs, every row is classified `unknown-section`,
+       * and the preview's "Create these sections and re-check" button appears on the FIRST
+       * import — which is the moment it was always meant for. */
+      const known = Object.fromEntries(offeringSections.map(x => [x.code.toUpperCase(), x]));
+      const here = ctx.courses?.find(c => c.offeringId === ctx.currentOffering) || null;
+      const parsed = RI.parseRosterFile(text, {
+        knownSections: known,
+        courseCode: ctx.currentCourseCode,
+        termCode: here?.termCode || null,
+        approved,
+      });
+
+      if (parsed.errors.length) { showImportError(parsed.errors); return; }
+      /* The dead end this avoids: a file whose EVERY row names another course number parses to
+       * zero rows, and the error box has one button on it — Close. That is precisely the file the
+       * override control exists for, so a course/term disagreement is never allowed to reach here.
+       * Render the preview instead; the commit button disables itself when nothing is staged. */
+      if (!parsed.rows.length && !parsed.unknownSections.length && !parsed.identityGroups.length) {
+        showImportError(['No rows in that file matched this course.',
+          ...parsed.skipped.slice(0, 4).map(s => `Line ${s.line} (${s.label}): ${s.reason}`)]);
+        return;
+      }
+
+      // Reconcile against what we already hold. Two reads, not one per student.
+      const ids = parsed.rows.map(r => r.student_id);
+      const [{ students: existing, error }, enrollmentState] = await Promise.all([
+        R.loadExistingStudents(ids),
+        R.loadEnrollmentState(ctx),
+      ]);
+      if (error) { showImportError([`Could not check the current roster: ${error.message}`]); return; }
+
+      const enrolledIds = new Set(enrollmentState.filter(e => e.status === 'active')
+                                                 .map(e => e.student_id));
+      const { fresh, conflicts } = RI.reconcile(parsed.rows, existing, enrolledIds);
+      // Decisions the operator already made, re-applied to the freshly parsed rows. Keyed by cadet
+      // id rather than by position: a re-parse that admits 57 more rows renumbers everything.
+      if (carry.resolutions) conflicts.forEach(c => {
+        const prior = carry.resolutions.get(c.row.student_id);
+        if (prior) c.resolution = prior;
+      });
+      // Who is on the roster but not in this file (scoped to the sections the file covers — see
+      // departures()), and who is in the file but was dropped by a previous import. Both are
+      // computed here rather than at commit so the operator decides in front of the names.
+      const departing = RI.departures(parsed, enrollmentState);
+      const returning = RI.returning(parsed.rows, enrollmentState);
+      // …and who is still here but somewhere else. Not a decision — see sectionMoves() — but the
+      // director sees the list, because a move relocates the row their work hangs off.
+      const { moves, ambiguous: ambiguousMoves } = RI.sectionMoves(parsed.rows, enrollmentState);
+      // `keep` holds the enrollment ids the operator has un-ticked, i.e. explicitly rescued from
+      // removal. Kept as an opt-OUT set rather than an opt-in one so the default is what the file
+      // says, and so re-rendering the preview does not quietly re-arm somebody they just spared.
+      // rawText is kept so "create these sections" can re-run this exact parse against the
+      // new sections without asking the operator to pick the file again.
+      staged = { parsed, fresh, conflicts, departing, returning, moves, ambiguousMoves,
+                 keep: carry.keep instanceof Set ? carry.keep : new Set(),
+                 approved, filename, rawText: text,
+                 summary: RI.summarize(parsed, { fresh, conflicts }, departing) };
+      renderPreview();
+    }
+
+    /** Everything a re-parse of the same file must not lose. See previewImport(). */
+    function carryOver() {
+      return {
+        approved: staged.approved,
+        keep: staged.keep,
+        resolutions: new Map(staged.conflicts.map(c => [c.row.student_id, c.resolution])),
+      };
+    }
+
+    /** The departures still armed for removal — everything the operator has not rescued. */
+    function toRemove() {
+      return (staged?.departing || []).filter(d => !staged.keep.has(d.enrollment_id));
+    }
+
+    /** Keep the commit button honest about what it is about to do, without a re-render. */
+    function syncCommitLabel() {
+      const btn = document.getElementById('csv-commit');
+      if (!btn || !staged) return;
+      const n = staged.summary.matched, r = toRemove().length;
+      btn.textContent = `Import ${n} student${n !== 1 ? 's' : ''}${r ? `, remove ${r}` : ''}`;
+    }
+
+    function renderPreview() {
+      const { parsed, fresh, conflicts, summary: s } = staged;
+      const box = document.getElementById('csv-preview');
+      box.style.display = '';
+
+      const decidable = conflicts.filter(c => !c.trivial);
+
+      /* ── Course identity: what the file claims, and what this offering is ─────────────────────
+       * The only control in the preview that WIDENS an import rather than narrowing it, so it is
+       * a list of specific claims with counts and deliberately not an "import everything anyway"
+       * switch. Each tick admits the rows whose ONLY disagreement is that one; a row that also
+       * names a different term stays out and stays visible in the skip list below.
+       *
+       * Ticking does not re-render — the same reason the departure checkboxes do not. The list of
+       * conflicts under this card can be a hundred rows deep, and a re-render mid-decision throws
+       * the operator back to the top of the page. The button applies them.
+       */
+      const idGroups = parsed.identityGroups || [];
+      const groups = RI.groupSkipped(parsed);
+      const idBlocked = groups.otherCourse.length;
+      const here = ctx.courses?.find(c => c.offeringId === ctx.currentOffering) || null;
+      const expectedOf = (g) => (g.field === 'term' ? (here?.termLabel || g.expected) : g.expected);
+      const rowsTable = (list, cap = 25) => `
+          <div class="table-wrap" style="margin-top:8px"><table>
+            <thead><tr><th>Line</th><th>Who</th><th>Why</th></tr></thead>
+            <tbody>${list.slice(0, cap).map(k => `<tr>
+                <td>${k.line}</td><td>${esc(k.label)}</td>
+                <td class="muted">${esc(k.reason)}</td></tr>`).join('')}
+              ${list.length > cap ? `<tr><td colspan="3" class="muted">…and ${list.length - cap} more</td></tr>` : ''}
+            </tbody></table></div>`;
+
+      /* ── The three groups, by what the person can DO ──────────────────────────────────────────
+       * A  fix now          the section is not created yet: one button.
+       * B  stays out        the row itself is wrong; only the file can change that.
+       * C  another course   stays out. Letting one in is a separate, deliberate control, kept apart so it
+       *                     is never mistaken for the button in A. It is the only control here that
+       *                     WIDENS an import, so it is a list of specific claims with counts and not an
+       *                     "import everything anyway" switch: each tick admits only the rows whose ONLY
+       *                     disagreement is that one. Ticking does not re-render (a long list would jump
+       *                     the page); the button applies the ticks.
+       * A row is in one group only (parseRosterFile gives each skipped row one code). */
+      const identityOffer = (idGroups.length || idBlocked) ? `
+        <div class="card imp-group" id="grp-other" style="margin-top:14px">
+          <div class="card-title">${idBlocked
+            ? `${idBlocked} row${idBlocked !== 1 ? 's are' : ' is'} for another course or term`
+            : 'Rows let in although they name another course or term'}</div>
+          <div class="card-meta">This is <strong>${esc(here?.courseTitle || ctx.currentCourseCode)}</strong>${
+            here?.termLabel ? ` · ${esc(here.termLabel)}` : ''}. ${idBlocked
+            ? 'These rows <strong>stay out</strong> of the import.' : 'You chose to let them in; they are counted as ready above.'}</div>
+          ${idBlocked ? rowsTable(groups.otherCourse, 10) : ''}
+          <details class="more-options" id="grp-other-override" style="margin-top:12px"${staged.approved.size ? ' open' : ''}>
+            <summary>This row does belong here</summary>
+            <div class="alert alert-warn">Use this only when rows that name another course number or term really are for this
+              course (a second course number for the same course, say). It is separate from creating sections: it lets rows in,
+              and nothing in these columns is stored, they only decide which rows to take.
+              A tick admits only the rows whose <em>only</em> disagreement it is, and a row that also disagrees somewhere
+              unticked stays out.</div>
+            <div class="table-wrap"><table>
+              <thead><tr><th style="width:1%">Let in</th><th>What the file says</th>
+                <th style="width:1%">Rows</th></tr></thead>
+              <tbody>${idGroups.map(g => `<tr>
+                <td style="text-align:center"><input type="checkbox" data-idflag="${esc(g.key)}"
+                      ${staged.approved.has(g.key) ? 'checked' : ''}></td>
+                <td><strong>${esc(g.label)}</strong> "${esc(g.value)}"
+                    <span class="muted">${g.courseCode
+                      ? `— this course's code, ${esc(g.courseCode)}, does not name a subject and a number, so the file cannot be compared with it. Tick this only if these rows belong to this course.`
+                      : `— this course is ${esc(expectedOf(g)) || '—'}`}</span></td>
+                <td>${g.rows}</td></tr>`).join('')}</tbody></table></div>
+            <div style="margin:8px 0 12px">
+              <button class="btn btn-secondary btn-sm" id="id-recheck">Check again with the ticked rows let in</button>
+            </div>
+          </details>
+        </div>` : '';
+
+      // Group A. A course with NO sections at all is the first-import case and leads with that sentence: the
+      // button is then the only way forward rather than a repair.
+      const blocked = groups.fixable.length;
+      const firstImport = !offeringSections.length;
+      const sectionOffer = parsed.unknownSections.length ? `
+        <div class="card imp-group" id="grp-fix" style="margin-top:14px">
+          <div class="card-title">Fix now: create ${parsed.unknownSections.length} section${parsed.unknownSections.length !== 1 ? 's' : ''}</div>
+          <div class="card-meta">${firstImport ? 'This course has no sections yet, which is normal for a first import. ' : ''}The file names
+            ${parsed.unknownSections.length !== 1 ? 'these sections' : 'this section'}, which ${firstImport ? 'it' : 'this course'} does not have yet:
+            <strong>${esc(parsed.unknownSections.join(', '))}</strong>. ${blocked} row${blocked !== 1 ? 's are' : ' is'} waiting on
+            ${parsed.unknownSections.length !== 1 ? 'them' : 'it'}.</div>
+          <div style="margin-top:8px">
+            <button class="btn btn-primary" id="mk-sections">Create ${parsed.unknownSections.length !== 1 ? 'these sections' : 'this section'} and check again</button>
+          </div>
+          <div class="muted" style="font-size:0.85em;margin-top:6px">Each new section starts with:
+            ${parsed.unknownSections.map(c => `<code>${esc(c)}</code> ${esc(RI.describeSectionDefaults(c))}`).join('; ')}.
+            A code that is not a day letter followed by a digit (such as <code>LAB-3</code>) gets no meeting days, which is
+            right for a course without M and T days. You can correct either on the Staff tab afterwards.
+            ${(() => { if (courseDays.error) return `<div class="alert alert-error" id="imp-days-error" style="margin-top:6px">Could not read this course's meeting days (${esc(courseDays.error.message)}), so the days in this file were not checked against them.</div>`;
+              const n = RI.outsideDaysNote(parsed.unknownSections, courseDays.days);
+              return n ? `<div class="alert alert-info" id="imp-days-note" style="margin-top:6px">${esc(n)}</div>` : ''; })()}</div>
+        </div>` : '';
+
+      // Group B.
+      const skipSummary = groups.stayOut.length ? `
+        <div class="card imp-group" id="grp-out" style="margin-top:14px">
+          <div class="card-title">${groups.stayOut.length} row${groups.stayOut.length !== 1 ? 's' : ''} stay out and cannot be fixed here</div>
+          <div class="card-meta">Each of these has a problem in the row itself. Correct it in your file and upload the file
+            again; everything else can be imported now.</div>
+          ${rowsTable(groups.stayOut)}
+        </div>` : '';
+
+      const conflictBlock = decidable.length ? `
+        <div class="card" style="margin-top:14px">
+          <div class="card-title">${decidable.length} returning student${decidable.length !== 1 ? 's' : ''} — choose what to keep</div>
+          <div class="card-meta">These cadets already have a record, and this file has different
+            details for them. <strong>Keep existing</strong> enrolls them in this course and changes
+            nothing else. <strong>Use the file</strong> replaces the fields shown.
+            <button class="btn btn-ghost btn-sm" id="bulk-attach">Keep existing for all</button>
+            <button class="btn btn-ghost btn-sm" id="bulk-overwrite">Use the file for all</button>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Cadet</th><th>What would change</th><th style="white-space:nowrap">Resolution</th></tr></thead>
+            <tbody>${decidable.map((c, i) => `<tr>
+              <td style="white-space:nowrap">
+                <div>${esc(lastFirst(c.row.name))}</div>
+                <div class="muted" style="font-size:0.85em">${c.row.student_id}${c.alreadyEnrolled ? ' · already enrolled' : ''}</div>
+              </td>
+              <td>${c.diffs.map(d => `<div style="font-size:0.88em">
+                    <span class="muted">${esc(d.label)}:</span>
+                    <span style="text-decoration:line-through;opacity:0.65">${esc(d.from || '—')}</span>
+                    → <strong>${esc(d.to)}</strong></div>`).join('')}</td>
+              <td style="white-space:nowrap">
+                <label style="display:block;font-size:0.88em"><input type="radio" name="res-${i}" data-res="${i}" value="attach" ${c.resolution === 'attach' ? 'checked' : ''}> Keep existing</label>
+                <label style="display:block;font-size:0.88em"><input type="radio" name="res-${i}" data-res="${i}" value="overwrite" ${c.resolution === 'overwrite' ? 'checked' : ''}> Use the file</label>
+              </td></tr>`).join('')}</tbody></table></div>
+        </div>` : '';
+
+      const trivialCount = conflicts.length - decidable.length;
+
+      /* ── Departures: on the roster, not in the file ────────────────────────────────────────
+       * The one part of an import that takes something away, so it is the one part that is
+       * ticked-by-default-but-individually-reversible rather than a single yes/no. A registrar
+       * export IS the roster, so "these people left" is the file's plain claim and defaulting to
+       * ignoring it is how a roster rots; but the export is also occasionally wrong about one
+       * cadet, and a director who knows that needs to spare them without abandoning the other
+       * nineteen removals.
+       *
+       * What removal MEANS is stated on screen, not just in the code, because the two obvious
+       * readings differ by a term of student work: the enrollment is marked dropped, so they leave
+       * grading, the gradebook and every cohort number, while their account, their submissions and
+       * their grades all survive. Nothing here deletes anybody, and the reason is not squeamishness
+       * — the same person may be enrolled in another course, and their record is theirs, not this
+       * offering's.
+       *
+       * Scope is the WHOLE offering: only directors import, and they import a whole course at a
+       * time (director, 2026-07-28). The section breakdown is still shown, because a count the
+       * director can check against their own expectation is what makes the confirmation real.
+       */
+      const removing = toRemove();
+      const bySection = {};
+      staged.departing.forEach(d => { bySection[d.section_code] = (bySection[d.section_code] || 0) + 1; });
+      const departureBlock = staged.departing.length ? `
+        <div class="card" style="margin-top:14px;border-color:var(--red)">
+          <div class="card-title" style="color:var(--red)">${staged.departing.length} cadet${staged.departing.length !== 1 ? 's are' : ' is'} enrolled but not in this file</div>
+          <div class="card-meta">Un-tick anyone who should stay. The rest are
+            <strong>removed from this course</strong> when you import: they disappear from the
+            roster, grading and the gradebook, and stop counting toward class numbers.
+            <strong>Nothing is deleted</strong> — their account, submissions and grades are kept
+            (they may be taking another course), and re-importing a file that names them puts them
+            straight back.
+            <div style="margin-top:6px">By section:
+              ${esc(Object.keys(bySection).sort().map(c => `${c} ${bySection[c]}`).join(' · '))}.</div>
+            <div style="margin-top:8px">
+              <button class="btn btn-ghost btn-sm" id="dep-none">Keep everyone</button>
+              <button class="btn btn-ghost btn-sm" id="dep-all">Remove all ${staged.departing.length}</button>
+            </div>
+          </div>
+          <div class="table-wrap"><table>
+            <thead><tr><th style="width:1%">Remove</th><th>Cadet</th><th>Section</th></tr></thead>
+            <tbody>${staged.departing.map(d => `<tr>
+              <td style="text-align:center"><input type="checkbox" data-dep="${esc(d.enrollment_id)}"
+                    ${staged.keep.has(d.enrollment_id) ? '' : 'checked'}></td>
+              <td><div>${esc(lastFirst(d.name))}</div>
+                  <div class="muted" style="font-size:0.85em">${d.student_id}</div></td>
+              <td>${esc(d.section_code)}</td></tr>`).join('')}</tbody></table></div>
+        </div>` : '';
+
+      // The inverse, and never a decision: a cadet the registrar lists again is enrolled again.
+      // Shown so the count on the confirmation adds up and nobody is surprised by a name
+      // reappearing, but there is nothing here to opt out of — see returning().
+      const returnBlock = staged.returning.length ? `
+        <div class="alert alert-info" style="margin-top:14px">
+          <strong>${staged.returning.length} cadet${staged.returning.length !== 1 ? 's' : ''} removed by an earlier import
+          ${staged.returning.length !== 1 ? 'are' : 'is'} in this file again</strong> and will be re-enrolled with their
+          previous work intact: ${esc(staged.returning.map(r => lastFirst(r.name)).join(', '))}.
+        </div>` : '';
+
+      // Section changes. Also never a decision — the registrar is the authority on where a cadet
+      // sits, and the per-student dropdown on this same page already moves people without asking.
+      // Shown because a move relocates the enrollment row their work hangs off, and because a
+      // director reading "12 already on file" would otherwise have no idea anyone changed section.
+      const moveBlock = staged.moves.length ? `
+        <div class="alert alert-info" style="margin-top:14px">
+          <strong>${staged.moves.length} cadet${staged.moves.length !== 1 ? 's' : ''}
+          ${staged.moves.length !== 1 ? 'are' : 'is'} in a different section in this file</strong>
+          and will be moved. Their submissions and grades move with them.
+          <div class="table-wrap" style="margin-top:8px"><table>
+            <thead><tr><th>Name</th><th>From</th><th>To</th></tr></thead>
+            <tbody>${staged.moves.map(m => `<tr>
+              <td>${esc(lastFirst(m.name))}</td>
+              <td>${esc(m.section_code)}</td>
+              <td><strong>${esc(m.to_section_code)}</strong></td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        </div>` : '';
+
+      // The moves we refused to guess at. A warning rather than a blocker: everything else in the
+      // file is still correct and still worth importing, and these need a person with the repair
+      // script, not a click here. See sectionMoves() for what lands in this list.
+      const ambiguousBlock = staged.ambiguousMoves.length ? `
+        <div class="alert alert-warn" style="margin-top:14px">
+          <strong>${staged.ambiguousMoves.length} cadet${staged.ambiguousMoves.length !== 1 ? 's' : ''}
+          could not be moved automatically</strong> and will be left exactly as
+          ${staged.ambiguousMoves.length !== 1 ? 'they are' : 'it is'} — nothing about
+          ${staged.ambiguousMoves.length !== 1 ? 'them' : 'them'} is written by this import.
+          <ul style="margin:8px 0 0 18px">
+            ${staged.ambiguousMoves.map(a => `<li>${esc(lastFirst(a.name))}
+              (${esc(a.section_code)} → ${esc(a.to_section_code)}): ${esc(a.reason)}</li>`).join('')}
+          </ul>
+          <div class="muted" style="margin-top:6px">These are repairs rather than imports. Ask for
+            <code>scripts/fall2026/repair_duplicate_enrollments.py</code> to be run against the
+            registrar export.</div>
+        </div>` : '';
+
+      box.innerHTML = `
+        <div class="alert alert-info" id="imp-headline">
+          <div style="font-size:1.08em;font-weight:700">${esc(RI.importHeadline(parsed))}</div>
+          <div style="margin-top:6px">${s.matched
+            ? `Ready now: ${[
+                fresh.length ? `<strong>${fresh.length}</strong> new cadet${fresh.length !== 1 ? 's' : ''}` : '',
+                conflicts.length ? `<strong>${conflicts.length}</strong> ${conflicts.length !== 1 ? 'cadets who already have accounts' : 'cadet who already has an account'} from an earlier term or course${trivialCount ? ` (${trivialCount} unchanged)` : ''}; no second account is made for ${conflicts.length !== 1 ? 'them' : 'them'}` : '',
+              ].filter(Boolean).join(', and ')}. Sections: ${esc(s.sections.join(', ') || '—')}.`
+            : (groups.fixable.length ? 'Nothing is imported until the sections below are created.' : 'Nothing in this file can be imported as it is.')}</div>
+          ${s.overridden ? `<div class="muted" style="margin-top:4px">${s.overridden} of them are
+             here only because you let in rows that name another course or term.</div>` : ''}
+          ${parsed.noSquadron ? `<div class="muted" style="margin-top:4px">${parsed.noSquadron} of
+             them have no squadron. They are imported anyway — squadron is advisory and nothing
+             depends on it.</div>` : ''}
+        </div>
+        ${sectionOffer}
+        ${skipSummary}
+        ${identityOffer}
+        ${fresh.length ? `<details${fresh.length <= 12 ? ' open' : ''}>
+          <summary class="muted" style="cursor:pointer;font-size:0.88em">${fresh.length} new student(s)</summary>
+          <div class="table-wrap" style="margin-top:8px"><table>
+            <thead><tr><th>Cadet ID</th><th>Name</th><th>Email</th><th>Sqdn</th><th>Section</th></tr></thead>
+            <tbody>${fresh.slice(0, 25).map(r => `<tr>
+              <td>${r.student_id}</td><td>${esc(lastFirst(r.name))}</td>
+              <td class="muted" style="font-size:0.9em">${esc(r.email)}</td>
+              <td>${esc(r.squadron || '—')}</td><td>${esc(r.section_code)}</td></tr>`).join('')}
+            ${fresh.length > 25 ? `<tr><td colspan="5" class="muted">…and ${fresh.length - 25} more</td></tr>` : ''}
+            </tbody></table></div></details>` : ''}
+        ${conflictBlock}
+        ${moveBlock}
+        ${ambiguousBlock}
+        ${returnBlock}
+        ${departureBlock}
+        <div class="row" style="gap:10px;margin-top:14px">
+          <button class="btn btn-primary" id="csv-commit"${
+            // Nothing matched and nothing to remove: the only real action on screen is the section
+            // offer above. Leaving a primary "Import 0 students" beside it invites the click that
+            // writes an audit row saying nothing happened, and reads as the way forward when it
+            // is not.
+            s.matched || removing.length ? '' : ' disabled title="Nothing to import yet"'
+          }>Import ${s.matched} student${s.matched !== 1 ? 's' : ''}${
+            removing.length ? `, remove ${removing.length}` : ''}</button>
+          <button class="btn btn-secondary" id="csv-cancel">Cancel</button>
+          <span id="csv-status" style="font-size:0.85em"></span>
+        </div>`;
+
+      box.querySelectorAll('[data-res]').forEach(r => r.addEventListener('change', () => {
+        decidable[Number(r.dataset.res)].resolution = r.value;
+      }));
+      document.getElementById('bulk-attach')?.addEventListener('click', () => {
+        decidable.forEach(c => { c.resolution = 'attach'; }); renderPreview();
+      });
+      document.getElementById('bulk-overwrite')?.addEventListener('click', () => {
+        decidable.forEach(c => { c.resolution = 'overwrite'; }); renderPreview();
+      });
+      // A tick means "remove"; `keep` records the un-ticked, so the set holds the exceptions the
+      // operator made rather than the default the file already states.
+      //
+      // Deliberately NOT a re-render: the departure table can be a hundred rows, and re-rendering
+      // the whole preview on every tick would jump the operator back to the top of it mid-decision
+      // — the same defect just fixed on the feedback page. Only the commit button's count depends
+      // on this, so only the commit button is updated.
+      box.querySelectorAll('[data-dep]').forEach(cb => cb.addEventListener('change', () => {
+        if (cb.checked) staged.keep.delete(cb.dataset.dep);
+        else staged.keep.add(cb.dataset.dep);
+        syncCommitLabel();
+      }));
+      document.getElementById('dep-none')?.addEventListener('click', () => {
+        staged.departing.forEach(d => staged.keep.add(d.enrollment_id));
+        box.querySelectorAll('[data-dep]').forEach(cb => { cb.checked = false; });
+        syncCommitLabel();
+      });
+      document.getElementById('dep-all')?.addEventListener('click', () => {
+        staged.keep.clear();
+        box.querySelectorAll('[data-dep]').forEach(cb => { cb.checked = true; });
+        syncCommitLabel();
+      });
+      // A tick records the approval; the button spends it. Splitting the two is what lets a
+      // director tick three flags and pay for one re-parse, and what lets "create these sections"
+      // pick up approvals that have not been applied yet — both re-parses read the same set.
+      box.querySelectorAll('[data-idflag]').forEach(cb => cb.addEventListener('change', () => {
+        if (cb.checked) staged.approved.add(cb.dataset.idflag);
+        else staged.approved.delete(cb.dataset.idflag);
+      }));
+      document.getElementById('id-recheck')?.addEventListener('click', () => {
+        const carry = carryOver();
+        previewImport(staged.rawText, staged.filename, carry);
+      });
+      document.getElementById('mk-sections')?.addEventListener('click', doCreateSections);
+      document.getElementById('csv-commit').onclick = doCommit;
+      document.getElementById('csv-cancel').onclick = clearImport;
+    }
+
+    /**
+     * Re-resolve ctx's section scope after a section is created.
+     *
+     * `ctx.sectionsById` and `ctx.sectionIds` are resolved ONCE at bootstrap, so a section created
+     * during this page's lifetime is invisible to `ctx.sectionCodeOf()` (it echoes the raw uuid)
+     * and missing from the section filters on Grade and Report until a reload. setCurrentOffering()
+     * re-runs that resolution and is idempotent when handed the offering already selected — it is
+     * the only exported route to it, which is why it is called with the current value rather than
+     * a new one.
+     */
+    function refreshCtxSections() {
+      return ctx.setCurrentOffering(ctx.currentOffering);
+    }
+
+    /**
+     * Create the sections the file referenced, then re-parse the SAME file against them.
+     * Re-parsing rather than patching the staged rows keeps one code path: the rows that were
+     * skipped for an unknown section go through exactly the validation everything else did.
+     */
+    async function doCreateSections() {
+      const btn = document.getElementById('mk-sections');
+      const codes = staged.parsed.unknownSections;
+      btn.disabled = true; btn.textContent = 'Creating…';
+      const { error } = await R.createSections(ctx, codes);
+      if (error) { btn.disabled = false; btn.textContent = 'Create the sections and check again';
+                   showImportError([`Could not create sections: ${error.message}`]); return; }
+      const { sections } = await R.loadOfferingSections(ctx);
+      offeringSections = sections;
+      await refreshCtxSections();
+      staged.sectionsCreated = (staged.sectionsCreated || 0) + codes.length;
+      const created = staged.sectionsCreated, name = staged.filename, text = staged.rawText;
+      const carry = carryOver();
+      await previewImport(text, name, carry);
+      if (staged) staged.sectionsCreated = created;
+    }
+
+    /**
+     * One sentence for the audit row naming what the operator waved through, or null.
+     *
+     * An override is a judgment about a file that nobody else can see afterwards — the export is
+     * on somebody's laptop and the rows it produced look exactly like every other row. The
+     * `roster_imports` row is the only durable record that 57 cadets came in under a course number
+     * this offering does not use, and the next person to wonder why has nowhere else to look.
+     */
+    function overrideNote() {
+      const used = (staged.parsed.identityGroups || []).filter(g => staged.approved.has(g.key));
+      if (!used.length || !staged.summary.overridden) return null;
+      return `${staged.summary.overridden} cadet(s) imported over a course/term mismatch approved `
+           + `by the operator: ${used.map(g => `${g.label} "${g.value}"`).join(', ')}.`;
+    }
+
+    async function doCommit() {
+      if (!staged) return;
+      const st = document.getElementById('csv-status');
+      const btn = document.getElementById('csv-commit');
+
+      /* A second, explicit confirmation for the removals — and only for the removals. Everything
+       * else an import does is additive or was decided row by row above; this is the one step that
+       * takes a cadet out of a course, so it names them in the dialog rather than asking about a
+       * count. Up to eight, then a tail count: a confirm() that runs off the screen cannot be read
+       * and so is not a confirmation. The list on the page above is the complete one. */
+      const removing = toRemove();
+      if (removing.length) {
+        const names = removing.slice(0, 8).map(d => `  • ${lastFirst(d.name)} (${d.section_code})`);
+        if (!confirm(
+          `Remove ${removing.length} cadet${removing.length === 1 ? '' : 's'} from this course?\n\n`
+          + names.join('\n')
+          + (removing.length > 8 ? `\n  …and ${removing.length - 8} more` : '')
+          + `\n\nThey are on the roster but not in this file. Their accounts, submissions and `
+          + `grades are KEPT — they just stop being enrolled here. Importing a file that names `
+          + `them again puts them back.`)) {
+          return;
+        }
+      }
+
+      btn.disabled = true;
+      st.style.color = 'var(--muted)'; st.textContent = 'Importing…';
+
+      const { error, counts, invisible, dropped, reactivated, moved, auditWarning } = await R.commitRoster(
+        ctx, staged.fresh, staged.conflicts,
+        { departing: removing, returning: staged.returning, moves: staged.moves },
+        { filename: staged.filename, rowsInFile: staged.summary.inFile,
+          sectionsCreated: staged.sectionsCreated || 0, overrides: overrideNote() });
+
+      if (error) {
+        btn.disabled = false;
+        st.style.color = 'var(--red)'; st.textContent = '⚠ ' + error.message;
+        return;
+      }
+      st.style.color = 'var(--green)';
+      st.innerHTML = `✓ ${counts.students_created} added, ${counts.students_updated} updated, `
+        + `${counts.students_untouched} left as-is`
+        + (moved ? `, ${moved} moved section` : '')
+        + (dropped ? `, ${dropped} removed` : '')
+        + (reactivated ? `, ${reactivated} re-enrolled` : '')
+        // Worth saying out loud: some of those "new" students turned out to already exist in a
+        // course this director cannot see, so their records were enrolled but not touched.
+        + (invisible ? `<div class="muted" style="margin-top:6px">${invisible} of the new
+             students already had a record from another course — they were enrolled here without
+             changing it.</div>` : '');
+      if (auditWarning) console.warn('Roster import audit row failed:', auditWarning);
+      clearImport();
+      await renderStudents();
+      // Straight into provisioning rather than leaving a button for it. An imported roster with no
+      // logins is a roster nobody can use, and the second step was easy to walk away from — see
+      // autoProvision().
+      await autoProvision(`✓ ${counts.students_created} added, ${counts.students_updated} updated`);
+    }
+
+    /* ── Add one cadet ────────────────────────────────────────────────────────
+     * Two paths through one form, and which one you are on is decided by the search box rather
+     * than by a mode toggle:
+     *
+     *   PICK AN EXISTING CADET  — someone already in PREP (your other course, usually). Their
+     *     details fill in and lock, because this screen enrolls people and does not edit them:
+     *     silently rewriting a name the operator never compared is exactly what the roster
+     *     import's review step exists to prevent. All that is written is an enrollment.
+     *   TYPE A NEW ONE         — the transfer nobody has a record for. Both writes happen.
+     *
+     * A cadet the search cannot see (they only ever took somebody else's course — see
+     * searchStudents' header on RLS) is still reachable through the second path: the upsert keys
+     * on the cadet ID, which is a primary key, so it merges onto their existing record rather than
+     * creating a second one.
+     */
+    function wireAddStudentModal() {
+      const m = document.getElementById('add-stu-modal');
+      wireModalDismiss(m, () => m.classList.remove('open'));
+      document.getElementById('as-save').addEventListener('click', doAddStudent);
+      document.getElementById('as-search').addEventListener('input', (e) => {
+        // Debounced: this is a query per keystroke otherwise, and the list it fills is small
+        // enough that the extra 200 ms is not perceptible.
+        clearTimeout(addSearchTimer);
+        const q = e.target.value;
+        addSearchTimer = setTimeout(() => runStudentSearch(q), 200);
+      });
+    }
+
+    function openAddStudent() {
+      if (!offeringSections.length) {
+        alert('This course has no sections yet — a cadet is enrolled INTO a section, not into the '
+            + 'course.\n\nEither import the registrar\'s roster above (it offers to create every '
+            + 'section the file names), or add one under Staff → Section coverage.');
+        return;
+      }
+      clearAddPick();
+      document.getElementById('as-search').value = '';
+      document.getElementById('as-results').hidden = true;
+      document.getElementById('as-error').textContent = '';
+      document.getElementById('as-sec').innerHTML =
+        offeringSections.map(s => `<option value="${esc(s.id)}">${esc(s.code)}</option>`).join('');
+      const btn = document.getElementById('as-save');
+      btn.disabled = false; btn.textContent = 'Add to this course';
+      document.getElementById('add-stu-modal').classList.add('open');
+    }
+
+    async function runStudentSearch(q) {
+      const box = document.getElementById('as-results');
+      if (String(q || '').trim().length < 2) { box.hidden = true; box.innerHTML = ''; return; }
+      const hits = await R.searchStudents(q);
+      box.hidden = false;
+      if (!hits.length) {
+        box.innerHTML = `<div class="pick-empty">Nobody found — fill in the fields below to add them
+          as a new cadet. If they exist in a course you don't teach, their cadet ID still finds
+          them.</div>`;
+        return;
+      }
+      box.innerHTML = hits.map(s => `<button type="button" class="pick-item"
+          data-pick="${s.student_id}" data-name="${esc(s.name)}"
+          data-email="${esc(s.email || '')}" data-sq="${esc(s.squadron || '')}">
+          ${esc(lastFirst(s.name))}
+          <span class="pi-sub">${s.student_id}${s.squadron ? ' · ' + esc(s.squadron) : ''}</span>
+        </button>`).join('');
+      box.querySelectorAll('[data-pick]').forEach(b => b.addEventListener('click', () => pickStudent(b.dataset)));
+    }
+
+    function pickStudent(d) {
+      addPicked = { student_id: d.pick, name: d.name, email: d.email, squadron: d.sq };
+      document.getElementById('as-sid').value = d.pick;
+      document.getElementById('as-nm').value  = d.name;
+      document.getElementById('as-em').value  = d.email;
+      document.getElementById('as-sq').value  = d.sq;
+      ['as-sid', 'as-nm', 'as-em', 'as-sq'].forEach(id => { document.getElementById(id).disabled = true; });
+      document.getElementById('as-results').hidden = true;
+      const note = document.getElementById('as-picked');
+      note.style.display = '';
+      note.innerHTML = `Enrolling <strong>${esc(d.name)}</strong> (${esc(d.pick)}) — the record they
+        already have. Nothing about the person changes.
+        <button class="btn btn-ghost btn-sm" id="as-unpick" style="margin-left:6px">Choose someone else</button>`;
+      document.getElementById('as-unpick').addEventListener('click', clearAddPick);
+    }
+
+    function clearAddPick() {
+      addPicked = null;
+      ['as-sid', 'as-nm', 'as-em', 'as-sq'].forEach(id => {
+        const el = document.getElementById(id);
+        el.disabled = false; el.value = '';
+      });
+      document.getElementById('as-picked').style.display = 'none';
+      document.getElementById('as-picked').innerHTML = '';
+    }
+
+    async function doAddStudent() {
+      const err = document.getElementById('as-error'), btn = document.getElementById('as-save');
+      err.textContent = '';
+      const payload = {
+        student_id: document.getElementById('as-sid').value.trim(),
+        name:       document.getElementById('as-nm').value.trim(),
+        email:      document.getElementById('as-em').value.trim(),
+        squadron:   document.getElementById('as-sq').value.trim(),
+        section_id: document.getElementById('as-sec').value,
+      };
+      if (!payload.student_id) { err.textContent = 'Enter their cadet ID.'; return; }
+      if (!addPicked && !payload.name) { err.textContent = 'Enter their full name.'; return; }
+
+      btn.disabled = true; btn.innerHTML = '<span class="spinner on-dark"></span> Adding…';
+      const { error, created } = await R.addStudentToOffering(ctx, payload);
+      if (error) {
+        btn.disabled = false; btn.textContent = 'Add to this course';
+        err.textContent = '⚠ ' + error.message;
+        return;
+      }
+      document.getElementById('add-stu-modal').classList.remove('open');
+      await renderStudents();
+      // Give them a login straight away — see autoProvision().
+      await autoProvision(created
+        ? `✓ ${payload.name} added`
+        : `✓ Enrolled — that cadet already had a record, which was left as it is`);
+    }
+
+    /* ── Provisioning, without being asked ────────────────────────────────────
+     * "Can we automatically provision all accounts when created?" (director, 2026-07-27) — yes,
+     * and this is where. Any path that adds cadets calls this afterwards.
+     *
+     * NOT on first login, which was the other half of the question: signing in IS the account, so
+     * there is nothing to hang a first-login hook on. A cadet with no auth user cannot reach any
+     * PREP page to trigger anything — the only way to create one is a staff-authenticated call, so
+     * "at creation" is the earliest moment that exists.
+     *
+     * `provision-students` is idempotent (it selects only enrollments where `auth_user_id IS NULL`)
+     * and returns 0 when there is nothing to do, so calling it after every add is cheap and safe.
+     * The manual button stays: this can fail — a cadet with no email address is SKIPPED, by
+     * design — and that needs a visible, retryable control rather than a silent partial result.
+     */
+    async function autoProvision(prefix) {
+      const out = document.getElementById('prov-result');
+      const { data, error } = await R.provision(ctx);
+      const res = data || {};
+      if (!out) return;
+      if (error || res.error) {
+        out.style.color = 'var(--alert-warn-fg)';
+        out.textContent = `${prefix}, but creating the login failed: ${res.error || error.message}`
+                        + ' — use “Provision accounts” to retry.';
+        return;
+      }
+      const noEmail = res.skipped_no_email || 0;
+      out.style.color = res.count ? 'var(--green)' : 'var(--muted)';
+      out.innerHTML = `${esc(prefix)}${res.count ? ` · ${res.count} login${res.count === 1 ? '' : 's'} created` : ''}`
+        + (noEmail ? `<div style="color:var(--alert-warn-fg);margin-top:6px">${noEmail} cadet(s)
+             have no email address on file and were not given a login. Add the address and use
+             “Provision accounts”.</div>` : '');
+      if (res.errors?.length) console.warn('Provision errors:', res.errors);
+      if (res.count) setTimeout(renderStudents, 1200);
+    }
+
+    async function doProvision() {
+      const btn = document.getElementById('prov-btn'), out = document.getElementById('prov-result');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner on-dark"></span> Provisioning…'; out.textContent = '';
+      const { data, error } = await R.provision(ctx);
+      btn.disabled = false; btn.textContent = 'Provision accounts';
+      const res = data || {};
+      if (error || res.error) { out.style.color = 'var(--red)'; out.textContent = '⚠ ' + (res.error || error.message); return; }
+      out.style.color = res.count ? 'var(--green)' : 'var(--muted)';
+      const noEmail = res.skipped_no_email || 0;
+      const otherFailures = (res.errors?.length || 0) - noEmail;
+      out.innerHTML = `✓ ${res.count || 0} account${res.count !== 1 ? 's' : ''} created`
+        // A cadet with no address is the one failure an operator can actually fix, so it gets
+        // a sentence rather than a console entry.
+        + (noEmail ? `<div style="color:var(--alert-warn-fg);margin-top:6px">
+             ${noEmail} skipped — no email address on file. Re-import the registrar's export
+             (with its <code>Email</code> column) and provision again.</div>` : '')
+        + (otherFailures > 0 ? `<div style="color:var(--red);margin-top:4px">${otherFailures} failed — see the browser console.</div>` : '');
+      if (res.errors?.length) console.warn('Provision errors:', res.errors);
+      setTimeout(renderStudents, 2000);
+    }
+
+    /* Remove one cadet from the course.
+     *
+     * DROPS the enrollment; it used to DELETE it, cascading away every submission and grade they
+     * had. Director's rule (2026-07-28): **a student is never deleted, because they may be in
+     * another course.** Two supporting reasons. The word "Remove" now appears twice on this page —
+     * here, and on the roster import's departure list — and one button silently destroying a term
+     * of work while the other preserves it is a trap, not a choice. And `dropped` was always the
+     * better default with nothing in the UI offering it: every other reader in the app filters
+     * `status = 'active'`, so a dropped cadet is already out of grading, the gradebook, the
+     * dashboard and every cohort denominator — removed in every sense a person means — while
+     * their record survives a mistake.
+     */
+    async function doRemove(enrollmentId, name, sid) {
+      if (!confirm(`Remove ${name} (${sid}) from this course?\n\nThey come off the roster and out `
+                 + `of grading, the gradebook and all class numbers. Their account, submissions `
+                 + `and grades are kept, and you can re-enroll them from the "removed" list.`)) return;
+      const { error } = await R.dropEnrollments([enrollmentId]);
+      if (error) { alert('Error removing student: ' + error.message); return; }
+      renderStudents();
+    }
+
+    // section-move modal
+    function wireSecModal() {
+      const m = document.getElementById('sec-modal');
+      wireModalDismiss(m, () => m.classList.remove('open'));
+      document.getElementById('sm-save').addEventListener('click', saveSection);
+    }
+    function openSecModal(enrollmentId, name, cur) {
+      editSid = enrollmentId;
+      document.getElementById('sm-name').textContent = name;
+      document.getElementById('sm-select').innerHTML = offeringSections.map(x => `<option value="${esc(x.id)}"${x.id === cur ? ' selected' : ''}>${esc(x.code)}</option>`).join('');
+      document.getElementById('sm-error').textContent = '';
+      document.getElementById('sec-modal').classList.add('open');
+    }
+    async function saveSection() {
+      const sec = document.getElementById('sm-select').value;
+      const err = document.getElementById('sm-error');
+      const { error } = await R.updateStudentSection(editSid, sec);
+      if (error) { err.textContent = 'Error: ' + error.message; return; }
+      document.getElementById('sec-modal').classList.remove('open');
+      renderStudents();
+    }
+
+    /* ── Reset a student's password to the default ─────────────────────────────
+     * The operator never chooses or sees the password: the edge function derives it from the
+     * cadet ID and flags the account so the student is forced to pick their own on the next
+     * sign-in. There is deliberately no "set a specific password" path — someone who knows a
+     * cadet's password is indistinguishable, in the database, from that cadet.
+     */
+    function wirePwModal() {
+      const m = document.getElementById('pw-modal');
+      wireModalDismiss(m, () => m.classList.remove('open'));
+      document.getElementById('pwm-confirm').addEventListener('click', doPwReset);
+    }
+    function openPwModal(studentId, name) {
+      pwTarget = { studentId, name };
+      document.getElementById('pwm-name').textContent = `${name} · ${studentId}`;
+      document.getElementById('pwm-error').textContent = '';
+      const btn = document.getElementById('pwm-confirm');
+      btn.disabled = false; btn.textContent = 'Reset to default';
+      document.getElementById('pw-modal').classList.add('open');
+    }
+    async function doPwReset() {
+      if (!pwTarget) return;
+      const err = document.getElementById('pwm-error'), btn = document.getElementById('pwm-confirm');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner on-dark"></span> Resetting…';
+      err.textContent = '';
+
+      const { data, error } = await R.resetStudentPassword(ctx, pwTarget.studentId);
+      const res = data || {};
+      if (error || res.error) {
+        btn.disabled = false; btn.textContent = 'Reset to default';
+        err.textContent = '⚠ ' + (res.error || error.message);
+        return;
+      }
+      document.getElementById('pw-modal').classList.remove('open');
+      alert(`${pwTarget.name}'s password is back to the default — the last 6 digits of their cadet ID.\n\n` +
+            `Tell them in person. They will have to choose a new password when they sign in.`);
+      pwTarget = null;
+    }
+
+    /* ───────────────────────────── Staff ───────────────────────────── */
+    async function renderStaff() {
+      const panel = document.getElementById('panel');
+      cache = await A.loadStaff(ctx);
+      const { staff, sections } = cache;
+      courseDays = await CD.loadCourseDays(db, ctx.currentCourse);
+      const meId = ctx.user.id;
+
+      const rows = staff.map(s => {
+        const isMe = s.instructorId === meId;
+        // Your own row renders the SAME <select>, disabled, rather than a badge. Previously it was a
+        // .score-badge (~20px) while every other row carried a full-height select (~40px), so the one
+        // row you always look at was the odd one out and the table read as broken. A disabled select
+        // is also the more honest control: it says "you cannot change your own role" in the place
+        // where the role is changed, instead of silently rendering a different kind of cell.
+        // A row still carrying the retired `grader` role gets it as an extra option, labelled as
+        // retired. Dropping it from the list would make the <select> render 'Director' (the first
+        // option) over a row that says 'grader', and one careless click would then promote them —
+        // a control that misreports the row it sits on is how P0.15 happened. See A.ROLE_LABEL.
+        const legacy = A.LEGACY_ROLE_LABEL[s.role] ? { [s.role]: A.LEGACY_ROLE_LABEL[s.role] } : {};
+        const roleOptions = (dis) =>
+          `<select data-role-for="${esc(s.instructorId)}"${dis ? ' disabled title="You cannot change your own role"' : ''}>
+             ${Object.entries({ ...A.ROLE_LABEL, ...legacy }).map(([v, l]) =>
+               `<option value="${v}"${v === s.role ? ' selected' : ''}>${l}</option>`).join('')}
+           </select>`;
+        const roleCell = `<div class="role-cell">${
+          s.implicit
+            ? `<span class="muted" style="font-size:0.8em">implicit — no staff row</span>`
+            : isMe
+            ? roleOptions(true) + `<span class="muted" style="font-size:0.75em">(you)</span>`
+            : roleOptions(false)
+        }</div>`;
+
+        /* THE SECTIONS COLUMN LISTS WHAT THEY ARE ASSIGNED, AND NOTHING ELSE (faculty beta,
+         * 2026-07-27). It used to print "All sections" for anyone holding an offering-wide row —
+         * which is every director and every person "+ Add staff" has ever created, since that is
+         * the row it writes by default. So the column read "All sections" for most of the table
+         * while the Section Coverage grid twenty pixels below showed the same people assigned to
+         * one section each, and the two flatly contradicted each other.
+         *
+         * They were answering different questions: coverage (what may I SEE) versus teaching
+         * assignment (what do I GRADE). Only the second belongs in a column headed Sections, and
+         * the first is already stated once, with names, above the grid — where it is a property of
+         * the offering rather than a constant repeated down every row. */
+        const scope = s.sections.length
+          ? s.sections.map(x => `<span class="score-badge pending">${esc(x.code)}</span>`).join(' ')
+          : `<span class="muted" style="font-size:0.8em">— none assigned —</span>`;
+
+        // Only a system admin may change another system admin — mirrors remove-instructor.
+        const canRemove = !isMe && (!s.sysadmin || isAdmin());
+        return `<tr>
+          <td><strong>${esc(lastFirst(s.name))}</strong>${
+            s.sysadmin ? ' <span class="score-badge partial">System admin</span>' : ''}</td>
+          <td>${roleCell}</td>
+          <td>${scope}</td>
+          <td style="text-align:right;white-space:nowrap">
+            <button class="btn btn-ghost btn-sm" data-reset="${esc(s.instructorId)}">Reset password</button>
+            ${canRemove
+              ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" data-remove="${esc(s.instructorId)}">Remove</button>`
+              : `<button class="btn btn-ghost btn-sm" disabled title="${isMe ? 'You cannot remove yourself' : 'Only a system admin can change another system admin'}">Remove</button>`}
+          </td></tr>`;
+      }).join('');
+
+      panel.innerHTML = (courseDays.error ? `<div class="alert alert-error" id="sec-days-error">Could not read this course's meeting days (${esc(courseDays.error.message)}), so the days on the sections below are not checked against them.</div>` : '') + `
+        <div class="card">
+          <div class="row wrap" style="justify-content:space-between;gap:10px">
+            <div>
+              <div class="card-title">Staff <span class="muted" style="font-weight:500">· ${staff.length}</span></div>
+              <div class="card-meta" style="margin-bottom:0">Who can grade, author, and administer this
+                offering. Roles do not carry into another term. <strong>Teaches</strong> is the
+                sections they personally grade — assign them on the coverage grid below.</div>
+            </div>
+            <button class="btn btn-primary btn-sm" id="add-btn">+ Add staff</button>
+          </div>
+          <div class="table-wrap" style="margin-top:16px"><table class="staff-tbl">
+            <thead><tr><th>Name</th><th>Role</th><th>Teaches</th><th></th></tr></thead>
+            <tbody>${rows}</tbody></table></div>
+          <div id="staff-status" class="muted" style="font-size:0.82em;min-height:1.2em;margin-top:12px"></div>
+          <div class="muted" style="font-size:0.8em">Removing revokes <strong>this offering only</strong> —
+            the person keeps their login and any other term they staff.
+            ${isAdmin() ? 'As a system admin you may also change other system admins.'
+                        : 'System-admin rows can only be changed by another system admin.'}</div>
+        </div>
+
+        ${sectionCoverage(staff, sections)}`;
+
+      wireStaff(panel);
+      wireCoverage(panel);
+    }
+
+    /* ───────────────────── Section coverage (P1.10 · P1.11) ─────────────────────
+     * Assignment happens HERE now, on the grid, instead of inside a per-person tick-box modal on
+     * the Staff table. Three complaints drove that, and each is answered by a different part of
+     * this function:
+     *
+     *   1. WRONG PLACE. "Who covers M1A" is a question about M1A, and it was only answerable by
+     *      opening six people's modals in turn and remembering what each said. The tile now holds
+     *      its own answer and its own controls.
+     *
+     *   2. TICK BOXES ARE THE WRONG CONTROL. Drag a name onto a tile, or pick from the tile's
+     *      dropdown. BOTH paths exist and that is not optional: drag-and-drop alone is a keyboard
+     *      trap and unusable on a tablet, which is exactly where an instructor stands when they
+     *      are doing this. The dropdown is the real control; the drag is the fast one.
+     *      (Native HTML5 drag events, not SortableJS — CORE.md §2 forbids a runtime dependency,
+     *      and faculty/lessons.html already does the same thing for orphan lessons.)
+     *
+     *   3. "+6 OFFERING-WIDE" WAS THE SAME NUMBER ON EVERY TILE. It never referenced the section it
+     *      was rendered under — it could not, since an offering-wide row covers everything — so a
+     *      director scanning the grid read an identical "+6" six times and learned nothing
+     *      section-specific from any of them. It is stated ONCE above the grid, with names, since
+     *      the people are already loaded. A per-offering constant rendered per-section is noise.
+     *
+     * The old modal survives as the per-person view (its copy is fixed below); this is the
+     * per-section one, and they write the same rows.
+     */
+    // What days a section meets, from its own stored days. A day the course's list does not carry is still shown, and says so.
+    function dayLine(sec) {
+      const held = CD.cleanDays(sec.meeting_days);
+      if (!held.length) return '<div class="muted" style="font-size:0.8em">No meeting day set</div>';
+      const outside = courseDays.error ? [] : CD.daysOutsideList(held, courseDays.days);
+      return `<div class="muted" style="font-size:0.8em">Meets ${esc(held.join(', '))}${outside.length
+        ? ` <span title="This course's list of meeting days is ${esc(CD.describeDays(courseDays.days))}. The section keeps this day.">(not in the course's list)</span>` : ''}</div>`;
+    }
+
+    function sectionCoverage(staff, sections) {
+      // Everyone who could hold a teaching assignment. Implicit rows are global admins with no
+      // staff_assignments row at all — assigning one CREATES their row, which is a real action, so
+      // they are offered here rather than hidden.
+      const pool = staff.slice().sort((a, b) => lastFirst(a.name).localeCompare(lastFirst(b.name)));
+      const wide = staff.filter(s => !s.implicit && s.wide);
+
+      /* ── Where sections come from (director, 2026-07-28) ──────────────────────────────────
+       * This card used to say sections "are created by a roster import on the Students tab", and
+       * the Students tab refused an import naming a section that did not exist. Neither statement
+       * was wrong on its own; together they were a closed loop with no entrance, and a new course
+       * could not be set up through the UI at all.
+       *
+       * Both halves are open now, and they are for different jobs rather than redundant: the
+       * import creates the sections a registrar export names, in bulk, which is how a term
+       * starts; this button creates ONE, which is how a section added late gets added. */
+      const addBtn = `<button class="btn btn-secondary btn-sm" id="sec-add">+ Add section</button>`;
+
+      if (!sections.length) {
+        return `<div class="card">
+          <div class="row wrap" style="justify-content:space-between;gap:10px;align-items:center">
+            <div class="card-title" style="margin-bottom:0">Section coverage</div>${addBtn}</div>
+          <div class="muted" style="margin-top:10px">No sections yet. Add them one at a time here,
+            or let the roster import on the <a href="#" data-goto-tab="students">Students</a> tab
+            create every section the registrar's export names — that is the usual way to start a
+            term, and it offers to create them from the file itself.</div></div>`;
+      }
+
+      const chip = (s) => `<span class="cov-chip" draggable="true" data-person="${esc(s.instructorId)}"
+          title="Drag onto a section, or use a section's dropdown">
+          ${esc(s.name)}${s.sysadmin ? ' <span class="cov-sys">admin</span>' : ''}</span>`;
+
+      const tiles = sections.map(sec => {
+        const named = staff.filter(s => s.sections.some(x => x.id === sec.id));
+        const free = pool.filter(s => !named.some(n => n.instructorId === s.instructorId));
+        return `<div class="sec-assign cov-tile" data-section="${esc(sec.id)}">
+          <div class="sec-tag">${esc(sec.code)}</div>
+          ${dayLine(sec)}
+          <div class="cov-holders">${named.length
+            ? named.map(s => `<span class="cov-held">${esc(s.name)}
+                <button class="cov-x" data-drop-person="${esc(s.instructorId)}"
+                        data-drop-section="${esc(sec.id)}" data-name="${esc(s.name)}"
+                        title="Remove ${esc(s.name)} from ${esc(sec.code)}"
+                        aria-label="Remove ${esc(s.name)} from ${esc(sec.code)}">×</button></span>`).join('')
+            : `<span class="cov-empty">— nobody assigned —</span>`}</div>
+          <select class="cov-add" data-add-to="${esc(sec.id)}"
+                  aria-label="Add an instructor to ${esc(sec.code)}"${free.length ? '' : ' disabled'}>
+            <option value="">${free.length ? '+ add instructor…' : 'everyone is assigned'}</option>
+            ${free.map(s => `<option value="${esc(s.instructorId)}">${esc(lastFirst(s.name))}</option>`).join('')}
+          </select>
+        </div>`;
+      }).join('');
+
+      return `<div class="card">
+        <div class="row wrap" style="justify-content:space-between;gap:10px;align-items:center">
+          <div class="card-title" style="margin-bottom:0">Section coverage
+            <span class="muted" style="font-weight:500">· ${sections.length}</span></div>${addBtn}</div>
+        <div class="card-meta" style="margin-top:10px">Drag a name onto a section, or use the section's dropdown. Each
+          person grades the sections they hold here — <code>staff_assignments</code> replaced
+          <code>sections.instructor_id</code>, so adding staff and assigning a section are one
+          action. Which <em>cadets</em> are in each section is the
+          <a href="#" data-goto-tab="students">Students</a> tab.</div>
+        ${wide.length ? `<div class="alert alert-info cov-wide">
+            <strong>${wide.length} of ${pool.length} hold offering-wide coverage:</strong>
+            ${wide.map(s => esc(s.name)).join(', ')}.
+            A staff row with no section (which is how a director is recorded, and what
+            <code>+ Add staff</code> writes by default) grants sight of <em>every</em> section and
+            picks up sections added later.
+            <span class="muted">The tiles below record who actually <em>teaches</em> each section —
+            that is what "my sections" means on the dashboard, the gradebook and the grading queue,
+            and it is separate from coverage. Directors teach too: give them a tile as well.</span>
+          </div>` : ''}
+        <div class="cov-pool" id="cov-pool">${pool.map(chip).join('')}</div>
+        <div class="sec-grid">${tiles}</div>
+        <div id="cov-status" class="muted" style="font-size:0.82em;min-height:1.2em;margin-top:10px"></div>
+      </div>`;
+    }
+
+    /* ── Create one section ───────────────────────────────────────────────────────────────────
+     * Meeting days and period are DERIVED from the code as you type, and shown as editable
+     * controls rather than applied invisibly. That is the same bargain sectionDefaultsFrom() makes
+     * on the import path and it is worth restating: the derivation is a default, not a rule the
+     * system keeps enforcing, and a section whose code does not start with the day it meets
+     * (anything outside the `[MTWRF][135][A-D]` convention) gets NO meeting day rather than an
+     * invented one. Leaving meeting_days empty is not neutral — resolveDueBySection() cannot place
+     * such a section, so it silently inherits the offering's default deadline — so the form shows
+     * the operator exactly what it is about to write and lets them fix it before it is written,
+     * which is cheaper than discovering it one lesson later.
+     */
+    async function openAddSection() {
+      // Only the days this course meets are offered. A code that reads as another day (W1A in an M and T course)
+      // is still accepted: its day is shown ticked and marked, so the section is made as typed.
+      const cd = await CD.loadCourseDays(db, ctx.currentCourse);
+      courseDays = cd;
+      const offered = cd.error ? CD.ALL_DAYS : CD.cleanDays(cd.days);
+      const dayBoxes = offered.map(d =>
+        `<label class="check-inline" style="margin-right:10px">
+           <input type="checkbox" class="ns-day" value="${d}"> ${d}</label>`).join('');
+      const dayErr = cd.error
+        ? `<div class="alert alert-error" id="ns-days-error">Could not read this course's meeting days (${esc(cd.error.message)}), so all five are shown.</div>`
+        : '';
+      const dayLead = cd.error ? '' : `This course meets ${esc(CD.describeDays(offered))}. `;
+      openModal('Add a section',
+        `<div class="form-grid" style="--fg-min:200px">
+         <div class="field"><label for="ns-code">Section code</label>
+           <input id="ns-code" type="text" autocomplete="off" placeholder="M1A" maxlength="20">
+           <div class="field-hint">The registrar's code for this section. It must be unique within
+             this course and term, and it is what a roster import matches rows against.</div></div>
+         <div class="field"><label>Meeting days</label>
+           <div id="ns-days" style="padding-top:4px">${dayBoxes}</div>
+           ${dayErr}
+           <div class="field-hint" id="ns-days-hint">${dayLead}Which day this section meets, so its deadlines land on its own
+             day rather than on the assignment's default.</div></div>
+         <div class="field"><label for="ns-period">Period</label>
+           <input id="ns-period" type="number" min="1" max="9" step="1" placeholder="1"></div>
+         </div>`,
+        'Create section',
+        async () => {
+          const code = document.getElementById('ns-code').value.trim().toUpperCase();
+          if (!code) return 'Enter a section code.';
+          if (cache.sections.some(s => String(s.code).toUpperCase() === code)) {
+            return `This course already has a section ${code}.`;
+          }
+          const days = [...document.querySelectorAll('.ns-day:checked')].map(b => b.value);
+          const periodRaw = document.getElementById('ns-period').value.trim();
+          const { error } = await R.createSection(ctx, code, days,
+                                                  periodRaw === '' ? null : parseInt(periodRaw, 10));
+          if (error) return error.message;
+          // ctx resolved its sections once at bootstrap — without this the new tile's own status
+          // line would print a uuid, and Grade/Report would not offer it until a reload.
+          await refreshCtxSections();
+          await renderStaff();
+          return null;
+        });
+
+      // Derive the defaults from the code as it is typed, and stop as soon as the operator
+      // touches either control by hand — re-deriving over an edit is how a form argues with the
+      // person filling it in. Untouched controls keep tracking the code.
+      const code = document.getElementById('ns-code');
+      const period = document.getElementById('ns-period');
+      let touched = false;
+      document.getElementById('ns-days').addEventListener('change', () => { touched = true; });
+      period.addEventListener('input', () => { touched = true; });
+      code.addEventListener('input', () => {
+        if (touched) return;
+        const d = R.sectionDefaultsFrom(code.value);
+        const wrap = document.getElementById('ns-days');
+        document.querySelectorAll('.ns-day-extra').forEach(el => el.remove());
+        for (const day of CD.daysOutsideList(d.meeting_days, offered)) {
+          wrap.insertAdjacentHTML('beforeend', `<label class="check-inline ns-day-extra" style="margin-right:10px">
+            <input type="checkbox" class="ns-day" value="${day}"> ${day} <span class="muted">(not in the course's list)</span></label>`);
+        }
+        document.querySelectorAll('.ns-day').forEach(b => { b.checked = d.meeting_days.includes(b.value); });
+        period.value = d.period ?? '';
+      });
+      code.focus();
+    }
+
+    function wireCoverage(panel) {
+      const status = (msg, colour = 'var(--muted)') => {
+        const el = document.getElementById('cov-status');
+        if (!el) return;
+        el.style.color = colour; el.textContent = msg;
+        if (colour !== 'var(--red)') setTimeout(() => { el.textContent = ''; }, 2600);
+      };
+      const personById = (id) => cache.staff.find(s => s.instructorId === id);
+
+      document.getElementById('sec-add')?.addEventListener('click', openAddSection);
+
+      async function assign(personId, sectionId) {
+        const who = personById(personId);
+        if (!who) return;
+        status('Saving…');
+        // Their existing role, never a chosen one — see addStaffSection()'s header on P0.15.
+        const { error } = await A.addStaffSection(ctx, personId, who.role, sectionId);
+        if (error) return status('⚠ ' + error.message, 'var(--red)');
+        status(`✓ ${who.name} → ${ctx.sectionCodeOf(sectionId)}`, 'var(--green)');
+        renderStaff();
+      }
+
+      panel.querySelectorAll('.cov-chip').forEach(el => {
+        el.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('text/plain', el.dataset.person);
+          e.dataTransfer.effectAllowed = 'copy';
+          el.classList.add('dragging');
+        });
+        el.addEventListener('dragend', () => el.classList.remove('dragging'));
+      });
+
+      panel.querySelectorAll('.cov-tile').forEach(tile => {
+        tile.addEventListener('dragover', (e) => { e.preventDefault(); tile.classList.add('over'); });
+        tile.addEventListener('dragleave', () => tile.classList.remove('over'));
+        tile.addEventListener('drop', (e) => {
+          e.preventDefault(); tile.classList.remove('over');
+          const id = e.dataTransfer.getData('text/plain');
+          if (id) assign(id, tile.dataset.section);
+        });
+      });
+
+      panel.querySelectorAll('.cov-add').forEach(sel => sel.addEventListener('change', () => {
+        if (sel.value) assign(sel.value, sel.dataset.addTo);
+      }));
+
+      panel.querySelectorAll('.cov-x').forEach(b => b.addEventListener('click', async () => {
+        status('Saving…');
+        const { error } = await A.removeStaffSection(ctx, b.dataset.dropPerson, b.dataset.dropSection);
+        if (error) return status('⚠ ' + error.message, 'var(--red)');
+        status(`✓ ${b.dataset.name} removed from ${ctx.sectionCodeOf(b.dataset.dropSection)}`, 'var(--green)');
+        renderStaff();
+      }));
+    }
+
+    function wireStaff(panel) {
+      const status = (msg, colour = 'var(--muted)') => {
+        const el = document.getElementById('staff-status');
+        el.style.color = colour; el.textContent = msg;
+        if (colour !== 'var(--red)') setTimeout(() => { el.textContent = ''; }, 3000);
+      };
+
+      // :not([disabled]) skips your own row's select. A disabled control cannot fire `change`, so
+      // this is belt-and-braces — but it keeps the intent readable and survives someone flipping the
+      // attribute off in devtools. The real gate is setRole()'s authorization, not the DOM.
+      panel.querySelectorAll('[data-role-for]:not([disabled])').forEach(sel => sel.addEventListener('change', async () => {
+        status('Saving…');
+        const { error } = await A.setRole(ctx, sel.dataset.roleFor, sel.value);
+        if (error) return status('⚠ ' + error.message, 'var(--red)');
+        status('✓ Role updated', 'var(--green)');
+        renderStaff();
+      }));
+
+      panel.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', async () => {
+        const who = cache.staff.find(s => s.instructorId === b.dataset.remove);
+        if (!confirm(`Remove ${who.name} from this offering?\n\n`
+          + `They keep their PREP login and any other term they staff.`)) return;
+        status('Removing…');
+        const { data, error } = await A.removeStaff(ctx, b.dataset.remove);
+        const msg = data?.error || error?.message;
+        if (msg) return status('⚠ ' + msg, 'var(--red)');
+        status('✓ Removed', 'var(--green)');
+        renderStaff();
+      }));
+
+      /* ── Reset a staff password to the default ──────────────────────────────
+       * This button said "Password help" and opened an explanation that PREP could not do it. That
+       * was honest and is now obsolete: staff have a derivable default (last name + 1234), so the
+       * reset restores a value the director can work out from the name in front of them rather
+       * than choosing one. The account is flagged, so the default survives one sign-in. Same shape,
+       * same constraint and same reasoning as the cadet reset — see A.defaultStaffPassword().
+       */
+      panel.querySelectorAll('[data-reset]').forEach(b => b.addEventListener('click', () => {
+        const who = cache.staff.find(s => s.instructorId === b.dataset.reset);
+        const pw = A.defaultStaffPassword(who.name);
+        openModal(`Reset password — ${who.name}`,
+          `<p style="font-size:0.94em;margin-bottom:14px">This puts <strong>${esc(who.name)}</strong>
+             back on the <strong>default</strong> password and requires them to choose a new one
+             the next time they sign in. Nothing else about their account changes.</p>
+           <div class="alert alert-info">Their default will be
+             <code>${esc(pw || '—')}</code> — their last name plus <code>1234</code>. Tell them in
+             person; PREP has no mail server and cannot send it.</div>
+           <p class="muted" style="font-size:0.88em">You cannot set a specific password and you are
+             never shown their current one. Somebody who chooses another person's password holds
+             working credentials for an account that finalizes grades, which is why the reset only
+             ever restores the default.</p>`,
+          'Reset to default',
+          async () => {
+            const { data, error } = await A.resetStaffPassword(ctx, who.instructorId);
+            const msg = data?.error || error?.message;
+            if (msg) return msg;
+            status(`✓ ${who.name} is back on the default password`, 'var(--green)');
+            return null;
+          });
+      }));
+
+      /* The per-person "Sections" tick-box modal was removed here on 2026-07-27. Its job — which
+       * sections somebody teaches — moved to the Section Coverage grid in P1.10/P1.11 and has
+       * lived in both places since, writing the same rows two ways. Two controls for one fact is
+       * how they disagree; the grid is the one that answers "who covers M1A", which is the question
+       * people actually arrive with. A.setStaffSections() is kept for a caller that needs to
+       * replace somebody's whole set at once. */
+
+      /* ── Add staff: existing people, or a new account ────────────────────────
+       * The modal only ever created accounts, and that was the beta's complaint: the ordinary case
+       * at the start of a term is a colleague who ALREADY has a PREP login from the other course,
+       * and creating a second one for them is not a cosmetic duplicate. Grades, extensions and
+       * unlocks are attributed to `instructors.id`, so a second identity splits their history with
+       * no way to rejoin it.
+       *
+       * Existing people come first in the form for that reason — it is both the common case and
+       * the one with a consequence for getting it wrong.
+       *
+       * SEVERAL AT ONCE since 2026-07-30 (director's request). Staffing an offering is a batch job
+       * done once a term, and one-at-a-time meant re-choosing the role on every pass — which is
+       * how one of five colleagues quietly becomes a director. The list is shown OPEN rather than
+       * hidden behind a search, because a couple of dozen instructors is a list you read, not a
+       * name you recall; typing filters it. See A.addExistingStaffMany for why it is one write. */
+      document.getElementById('add-btn').addEventListener('click', () => {
+        // Everybody with a PREP login who is not already staffing THIS offering. `instructors` is
+        // readable to any authenticated user (instructors_read), so this needs no extra query.
+        const held = new Set(cache.staff.map(s => s.instructorId));
+        const free = (cache.instructors || []).filter(i => !held.has(i.id))
+          .sort((a, b) => lastFirst(a.name).localeCompare(lastFirst(b.name)));
+
+        // The Grader option is gone from here (2026-07-27) — it granted exactly what Instructor
+        // grants. See A.ROLE_LABEL.
+        const roleField = `
+          <div class="field"><label for="ax-role">Role in this offering</label>
+             <select id="ax-role">
+               <option value="instructor">Instructor — grades their sections</option>
+               <option value="director">Director — full administration</option>
+               ${isAdmin() ? '<option value="system_admin">System admin — every course, every term</option>' : ''}
+             </select>
+             ${isAdmin() ? '' : '<div class="field-hint">Only a system admin can grant the system-admin role.</div>'}</div>`;
+
+        openModal('Add staff',
+          `<div class="field"><label for="ax-search">People who already have a PREP login</label>
+             <input id="ax-search" type="search" autocomplete="off"
+                    placeholder="${free.length ? 'Filter by name…' : 'Everybody with a login already staffs this offering'}"
+                    ${free.length ? '' : 'disabled'}>
+             <div class="field-hint">Tick as many as you like. This adds them to this offering and
+               never creates a second account — their grades and history stay on the identity they
+               already have.</div>
+             <div id="ax-results" class="pick-list pick-multi"></div></div>
+           <div id="ax-picked" class="alert alert-info" style="display:none"></div>
+           ${roleField}
+           <details style="margin-top:14px" id="ax-new">
+             <summary style="cursor:pointer;font-size:0.9em"><strong>Or create a new account</strong>
+               <span class="muted">— for somebody who has never used PREP</span></summary>
+             <div class="field" style="margin-top:10px"><label for="ax-name">Full name</label>
+               <input id="ax-name" placeholder="Jane Doe">
+               <div class="field-hint">Their first password is derived from it — last name + <code>1234</code>.</div></div>
+             <div class="field"><label for="ax-email">Email</label>
+               <input id="ax-email" type="email" placeholder="jane.doe@afacademy.af.edu">
+               <div class="field-hint">Becomes their sign-in address.</div></div>
+             <div class="alert alert-info" style="margin-bottom:0">They are put on the default
+               password and <strong>must change it</strong> before they can do anything in PREP.
+               Tell them in person — PREP has no mail server.</div>
+           </details>
+           <div class="alert alert-info">Either way this writes one <code>staff_assignments</code>
+             row for <strong>this offering</strong>. It grants nothing in any other term.</div>`,
+          'Add to offering',
+          async () => {
+            const role = document.getElementById('ax-role').value;
+            // The picked people win: if somebody filled in both halves, the ones they ticked are
+            // the more deliberate signal, and creating an account they did not ask for is the
+            // outcome with a consequence.
+            if (staffPicked.length) {
+              if (role === 'system_admin') {
+                return 'Granting system admin to an existing account is a System page action — '
+                     + 'pick Instructor or Director here.';
+              }
+              const { error } = await A.addExistingStaffMany(ctx, staffPicked.map(p => p.id), role);
+              if (error) return error.message;
+              // Name them. "3 added" leaves the operator to go and check WHICH three, and the
+              // whole point of a batch control is that they stop having to.
+              const names = staffPicked.map(p => lastFirst(p.name)).sort();
+              status(names.length === 1
+                ? `✓ ${staffPicked[0].name} added to this offering`
+                : `✓ ${names.length} added to this offering — ${names.join(', ')}`, 'var(--green)');
+              await renderStaff();
+              return null;
+            }
+            const name = document.getElementById('ax-name').value.trim();
+            const email = document.getElementById('ax-email').value.trim();
+            if (!name || !email) {
+              return free.length
+                ? 'Tick somebody in the list above, or open “create a new account” and fill in a name and email.'
+                : 'Enter a name and email under “create a new account”.';
+            }
+            const { data, error } = await A.addStaff(ctx, { name, email, role });
+            const msg = data?.error || error?.message;
+            if (msg) return msg;
+            status(`✓ ${name} added — their password is ${A.defaultStaffPassword(name)}`, 'var(--green)');
+            await renderStaff();
+            return null;
+          });
+
+        wireStaffPicker(free);
+      });
+    }
+
+    /* ── The existing-person picker inside the Add staff modal ────────────────
+     * Filtered in the browser, unlike the student one, because the two lists are different orders
+     * of magnitude: every instructor in PREP is a couple of dozen people and is already loaded by
+     * loadStaff(), where the cadet search is a few hundred rows behind RLS and has to be a query.
+     * Same markup, different source — which is the honest reason they are not shared.
+     *
+     * MULTI-SELECT since 2026-07-30, and that is what makes the two controls genuinely different
+     * rather than merely unshared. Two changes came with it:
+     *
+     *   The list is OPEN, not hidden until you type. The cadet picker must stay a search — a few
+     *   hundred names is not a list anybody reads — but two dozen colleagues is, and a director
+     *   staffing a new offering is choosing FROM a roster rather than recalling a name. Typing
+     *   still filters.
+     *
+     *   Picking no longer clears the box. Selecting one person used to close the results and empty
+     *   the query, which is right when the answer is one and actively hostile when it is five.
+     *   Ticked rows stay ticked through every filter change, because selection lives in
+     *   `staffPicked` and the DOM is redrawn from it.
+     */
+    let staffPicked = [];
+    function wireStaffPicker(pool) {
+      staffPicked = [];
+      const input = document.getElementById('ax-search');
+      const box = document.getElementById('ax-results');
+      if (!input) return;
+
+      const isPicked = id => staffPicked.some(p => p.id === id);
+
+      const paintChips = () => {
+        const note = document.getElementById('ax-picked');
+        if (!staffPicked.length) { note.style.display = 'none'; note.innerHTML = ''; return; }
+        note.style.display = '';
+        const n = staffPicked.length;
+        note.innerHTML = `<div style="margin-bottom:6px">Adding <strong>${n}</strong>
+            ${n === 1 ? 'person who already has a' : 'people who already have'} PREP login${n === 1 ? '' : 's'},
+            all as the role chosen below.</div>
+          <div class="row wrap" style="gap:6px">${staffPicked.map(p => `
+            <button type="button" class="chip-x" data-unpick="${esc(p.id)}"
+                    title="Remove ${esc(p.name)}">${esc(lastFirst(p.name))} <span aria-hidden="true">×</span></button>`).join('')}
+          </div>`;
+        note.querySelectorAll('[data-unpick]').forEach(b => b.addEventListener('click', () => {
+          staffPicked = staffPicked.filter(p => p.id !== b.dataset.unpick);
+          paintChips(); paint(input.value);
+        }));
+        // The "create a new account" half is unreachable for this save while anybody is ticked —
+        // close it rather than leave two live paths and a rule the operator has to know about.
+        document.getElementById('ax-new').open = false;
+      };
+
+      const paint = (q) => {
+        const t = String(q || '').trim().toLowerCase();
+        const hits = (t ? pool.filter(p => p.name.toLowerCase().includes(t)) : pool).slice(0, 50);
+        box.innerHTML = hits.length
+          ? hits.map(p => `<button type="button" class="pick-item${isPicked(p.id) ? ' picked' : ''}"
+               role="checkbox" aria-checked="${isPicked(p.id)}"
+               data-pick="${esc(p.id)}" data-name="${esc(p.name)}"
+               ><span class="pick-tick" aria-hidden="true">${isPicked(p.id) ? '✓' : ''}</span>${esc(lastFirst(p.name))}</button>`).join('')
+          : t
+            ? `<div class="pick-empty">Nobody with a login matches “${esc(q)}”. If they have never
+                 used PREP, create the account below.</div>`
+            : `<div class="pick-empty">Everybody with a PREP login already staffs this offering.</div>`;
+        box.querySelectorAll('[data-pick]').forEach(b => b.addEventListener('click', () => {
+          const id = b.dataset.pick;
+          staffPicked = isPicked(id)
+            ? staffPicked.filter(p => p.id !== id)
+            : [...staffPicked, { id, name: b.dataset.name }];
+          paintChips();
+          // Repaint in place rather than re-running the filter from the input: the query has not
+          // changed, and re-reading it would be the same work with one more way to disagree.
+          paint(q);
+        }));
+      };
+
+      input.addEventListener('input', (e) => paint(e.target.value));
+      paint('');       // open, showing everyone available
+    }
+
+    /* ═══════════════════════════ Extensions ═══════════════════════════
+     * Every deadline extension granted in this offering, and who granted it. Moved here verbatim
+     * from `faculty/extensions.html` on 2026-07-30 (director's request); that file is now a
+     * redirect into this tab. The data layer is untouched — `courseExtensions()` and the two
+     * governance verbs still live in faculty-grade.js beside the grant path.
+     *
+     * THE PAGE'S ORIGINAL PREMISE IS UNCHANGED and is why the banner stays: this exists so the
+     * NUMBER is visible, not so a grant can be undone. The per-instructor ranking is the headline
+     * because that is the conversation it is meant to start.
+     */
+    async function renderExtensions() {
+      const panel = document.getElementById('panel');
+      // Whole-offering scope, always. A director reading a per-instructor count off a subset of
+      // sections would be reading a comparison that is not one.
+      extRows = await courseExtensions(ctx, await allSectionIds(ctx));
+
+      panel.innerHTML = `
+        <div class="alert alert-info" style="margin-bottom:16px">
+          This tab exists so the number is visible, not so it can be undone. If an instructor is
+          granting more extensions than you would like, the fix is a conversation with them —
+          revoking one after the fact does not give a cadet their time back, and the database will
+          refuse it outright once the work is in.
+        </div>
+        <div class="toolbar">
+          <div class="field"><label for="ex-grp">Group by</label>
+            <select id="ex-grp">
+              <option value="instructor">Who granted it</option>
+              <option value="assignment">Assignment</option>
+              <option value="section">Section</option>
+            </select>
+          </div>
+          <div class="field"><label for="ex-show">Show</label>
+            <select id="ex-show">
+              <option value="active">Active only</option>
+              <option value="all">All, including revoked</option>
+              <option value="revoked">Revoked only</option>
+            </select>
+          </div>
+        </div>
+        <div id="ex-summary"></div>
+        <div id="ex-body"></div>`;
+
+      panel.querySelector('#ex-grp').addEventListener('change', drawExtensions);
+      panel.querySelector('#ex-show').addEventListener('change', drawExtensions);
+      // Delegated on the panel, which render() replaces wholesale on every tab change — so the
+      // listener goes with it rather than stacking.
+      panel.querySelector('#ex-body').addEventListener('click', onExtensionClick);
+      drawExtensions();
+    }
+
+    const extFiltered = () => {
+      const mode = document.getElementById('ex-show')?.value || 'active';
+      if (mode === 'active')  return extRows.filter(r => !r.isRevoked);
+      if (mode === 'revoked') return extRows.filter(r => r.isRevoked);
+      return extRows;
+    };
+
+    function drawExtensions() {
+      const summary = document.getElementById('ex-summary');
+      const body = document.getElementById('ex-body');
+      if (!summary || !body) return;
+
+      if (!extRows.length) {
+        summary.innerHTML = '';
+        body.innerHTML = `<div class="alert alert-ok">No extensions have been granted in this course.</div>`;
+        return;
+      }
+
+      // The headline is the per-instructor count — that is the number the conversation is
+      // about. Sorted descending so an outlier surfaces itself rather than having to be found.
+      const byInstructor = {};
+      for (const r of extRows) {
+        const k = r.grantedByName;
+        byInstructor[k] = byInstructor[k] || { total: 0, active: 0, revoked: 0 };
+        byInstructor[k].total++;
+        if (r.isRevoked) byInstructor[k].revoked++; else byInstructor[k].active++;
+      }
+      const ranked = Object.entries(byInstructor).sort((a, b) => b[1].total - a[1].total);
+
+      summary.innerHTML = `
+        <div class="card" style="padding:16px 18px;margin-bottom:16px">
+          <div class="card-title" style="margin-bottom:10px">Granted per instructor</div>
+          <div class="ext-rank">` + ranked.map(([name, c]) => `
+            <div class="ext-rank-row">
+              <span class="ext-rank-name">${esc(name)}</span>
+              <span class="ext-rank-bar"><span style="width:${(c.total / ranked[0][1].total * 100).toFixed(1)}%"></span></span>
+              <span class="ext-rank-n">${c.total}</span>
+              ${c.revoked ? `<span class="tag">${c.revoked} revoked</span>` : ''}
+            </div>`).join('') + `</div>
+        </div>`;
+
+      const list = extFiltered();
+      if (!list.length) { body.innerHTML = `<div class="muted">Nothing matches that filter.</div>`; return; }
+
+      const groupBy = document.getElementById('ex-grp').value;
+      const keyOf = r => groupBy === 'instructor' ? r.grantedByName
+                   : groupBy === 'assignment' ? r.assignmentTitle
+                   : ctx.sectionCodeOf(r.sectionId);
+
+      const groups = {};
+      for (const r of list) (groups[keyOf(r)] = groups[keyOf(r)] || []).push(r);
+
+      body.innerHTML = Object.entries(groups)
+        .sort((a, b) => b[1].length - a[1].length)
+        .map(([name, items]) => `
+          <section class="card" style="padding:16px 18px;margin-bottom:14px">
+            <div class="card-head" style="margin-bottom:10px">
+              <div class="card-title">${esc(name)}</div>
+              <div class="card-meta">${items.length} extension${items.length === 1 ? '' : 's'}</div>
+            </div>
+            <div class="ext-table">
+              <div class="ext-row ext-head">
+                <span>Cadet</span><span>Sec</span><span>Assignment</span>
+                <span>Original</span><span>Extended to</span><span>Reason</span><span></span>
+              </div>
+              ${items.map(r => `
+                <div class="ext-row${r.isRevoked ? ' revoked' : ''}">
+                  <span>${esc(lastFirst(r.studentName))}</span>
+                  <span>${esc(ctx.sectionCodeOf(r.sectionId))}</span>
+                  <span>${esc(r.assignmentTitle)}</span>
+                  <span class="muted">${r.originalDue ? esc(fmtDate(r.originalDue)) : '—'}</span>
+                  <span>${esc(fmtDateTime(r.due))}</span>
+                  <span class="ext-reason" title="${esc(r.reason)}">${esc(r.reason)}</span>
+                  <span class="ext-act">${r.isRevoked
+                    ? `<span class="tag danger">revoked</span>
+                       <button class="btn btn-ghost btn-sm" data-ext="reinstate" data-id="${esc(r.id)}">Reinstate</button>`
+                    : `<button class="btn btn-ghost btn-sm" data-ext="revoke" data-id="${esc(r.id)}"
+                         data-who="${esc(lastFirst(r.studentName))}" data-asgn="${esc(r.assignmentTitle)}">Revoke</button>`}
+                  </span>
+                  ${r.isRevoked ? `<span class="ext-revnote">Revoked by ${esc(r.revokedByName || '—')}
+                     ${esc(fmtDate(r.revokedAt))} — ${esc(r.revokedReason)}</span>` : ''}
+                </div>`).join('')}
+            </div>
+          </section>`).join('');
+    }
+
+    async function onExtensionClick(e) {
+      const el = e.target.closest('[data-ext]');
+      if (!el) return;
+      if (el.dataset.ext === 'revoke') {
+        revokeId = el.dataset.id;
+        document.getElementById('revoke-who').textContent = `${el.dataset.who} — ${el.dataset.asgn}`;
+        document.getElementById('revoke-reason').value = '';
+        document.getElementById('revoke-error').textContent = '';
+        document.getElementById('revoke-modal').classList.add('open');
+      } else if (el.dataset.ext === 'reinstate') {
+        if (!confirm('Reinstate this extension? The cadet gets the extended deadline back.')) return;
+        const { error } = await reinstateExtension(el.dataset.id);
+        if (error) { alert('Could not reinstate: ' + error.message); return; }
+        await renderExtensions();
+      }
+    }
+
+    function wireRevokeModal() {
+      const m = document.getElementById('revoke-modal');
+      wireModalDismiss(m, () => m.classList.remove('open'));
+      document.getElementById('revoke-save').addEventListener('click', async () => {
+        const reason = document.getElementById('revoke-reason').value.trim();
+        const err = document.getElementById('revoke-error');
+        if (!reason) { err.textContent = 'A reason is required.'; return; }
+        const { error } = await revokeExtension(ctx, revokeId, reason);
+        if (error) {
+          // Both refusals come from the 007 trigger and both deserve a sentence, not a
+          // constraint name: one is a rule about the cadet, the other about the caller.
+          err.textContent = /already submitted under it/i.test(error.message)
+            ? 'That cadet has already submitted under this extension, so it cannot be revoked. Withdrawing it now would only make an on-time submission late.'
+            : /only a course director/i.test(error.message)
+              ? 'Only a course director may revoke an extension.'
+              : 'Could not revoke: ' + error.message;
+          return;
+        }
+        m.classList.remove('open');
+        await renderExtensions();
+      });
+    }
+
+    /* ───────────────────────────── Export ─────────────────────────────
+     * The JSON backup's warning said "Contains student PII and every free-response answer" until
+     * 2026-07-28. Both halves were wrong. buildBackup() reads assignment_offerings, enrollments,
+     * submissions and grades — it never touches submission_activities, which is where answers and
+     * interaction reports live, so no student writing is in the file at all. And name + cadet ID +
+     * score are explicitly NOT treated as PII in this system (faculty-rollup.js:882,
+     * INTERACTION-DATA-CONTRACT §4), so calling them that made the one export a director should be
+     * able to take routinely look like a disclosure. What the file IS is a gradebook, and that is
+     * what it now says.
+     */
+    async function renderExport() {
+      const panel = document.getElementById('panel');
+      const { data: sections } = await import('../js/supabase.js')
+        .then(m => m.db.from('sections').select('id, code, meeting_days')
+          .eq('course_offering_id', ctx.currentOffering).order('code'));
+      const secs = sections || [];
+      const codeOf = Object.fromEntries(secs.map(s => [s.id, s.code]));
+      // Which day a section meets. `meeting_days` is the authority (a clean ['M'] or ['T'] on
+      // every live section); the code's first letter is the fallback for a hand-made section.
+      const trackOf = Object.fromEntries(secs.map(s =>
+        [s.id, (s.meeting_days && s.meeting_days[0]) || String(s.code || '')[0] || '?']));
+
+      panel.innerHTML = `
+        <div class="card" id="pub-card">
+          <div class="card-title">Publish everything that is due</div>
+          <div class="card-meta">Publishes every saved grade whose deadline has passed, in every
+            section, and gives a <strong>zero</strong> to every cadet who handed in nothing by
+            their deadline. Cadets see these at once. Do this <strong>before</strong> you fill a
+            Blackboard file: anything unpublished reaches Blackboard as a blank.</div>
+          <div class="card-meta">Anything that needs a person is <strong>held back and
+            listed</strong>, never published — a cadet who still has time on an extension, work
+            that came in after its zero, work nobody has graded yet. Nothing already published is
+            changed.</div>
+          <div class="row wrap" style="gap:14px;align-items:center;margin-top:10px">
+            <button class="btn btn-secondary" id="pub-check">Check what is waiting</button>
+            <button class="btn btn-primary" id="pub-go" style="display:none"></button>
+            <span id="pub-status" style="font-size:0.85em"></span>
+          </div>
+          <div id="pub-preview" style="margin-top:14px"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Blackboard grades CSV</div>
+          <div class="card-meta">Finalized grades only. A student with no finalized grade exports
+            <strong>blank, not zero</strong> — a zero posts to Blackboard as a real score.</div>
+          <div class="form-grid" style="--fg-min:220px">
+            <div class="field">
+              <label for="ex-scope">Sections</label>
+              <select id="ex-scope">
+                <option value="__all__">All sections (entire offering)</option>
+                ${secs.map(s => `<option value="${esc(s.id)}">${esc(s.code)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field-action"><button class="btn btn-primary" id="ex-csv">Download CSV</button></div>
+          </div>
+          <span id="ex-status" style="font-size:0.85em"></span>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Full JSON backup</div>
+          <div class="card-meta">Assignments, enrollments, submissions, and grades for
+            <strong>this offering</strong> — for archiving a term or moving data off-platform.</div>
+          <div class="card-meta">Names, cadet IDs, scores and AI feedback — the same material as
+            the grades CSV, plus structure. No free-response answers or interaction reports: those
+            live on the submission activities, which this export does not read. Treat it like a
+            gradebook file.</div>
+          <div class="row wrap" style="gap:14px">
+            <button class="btn btn-secondary" id="ex-json">Download backup (JSON)</button>
+            <span id="bk-status" style="font-size:0.85em"></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">Fill a Blackboard file</div>
+          <div class="card-meta">Upload the gradebook file you exported <strong>from
+            Blackboard</strong>. Preflight scores are written into the columns that are already
+            there, and the file is handed back ready to re-upload. No column is ever added,
+            renamed or reordered, so Blackboard will still accept it.</div>
+          <div class="card-meta">The file you get back holds <strong>only the preflight
+            columns</strong>, plus the name and ID columns Blackboard needs to find each cadet.
+            Homework, exams and totals are left out on purpose: Blackboard reads a blank cell as
+            <em>erase this</em>, and your export goes out of date the moment you download it.
+            Leaving those columns out is what makes them impossible to disturb.</div>
+          <div class="card-meta">Cadets are matched on <strong>cadet ID</strong>, never on name.
+            A lesson with no finalized grade — not yet graded, or not yet taught — is left
+            <strong>blank, not zero</strong>.</div>
+          <div class="card-meta"><strong>Upload every file you have at once.</strong> One PREP
+            course can span several Blackboard courses, and the page can only check a section it
+            has a file for — so it lists any section that is missing from all of them.</div>
+
+          <div class="dropzone" id="bb-dz" style="min-height:96px;margin-top:14px">
+            <div class="dz-ic">📄</div>
+            <div><strong>Choose files</strong> or drag &amp; drop them here<br>
+              <span class="card-meta">One per Blackboard course. You can add more after the
+                first.</span></div>
+          </div>
+
+          <div id="bb-preview" style="margin-top:16px"></div>
+        </div>`;
+
+      document.getElementById('ex-csv').addEventListener('click', async () => {
+        const st = document.getElementById('ex-status');
+        const pick = document.getElementById('ex-scope').value;
+        st.style.color = 'var(--muted)'; st.textContent = 'Building…';
+        // A read that fails stops the export with a message. It must never produce a file that looks complete.
+        try {
+          const ids = pick === '__all__' ? await allSectionIds(ctx, { strict: true }) : [pick];
+          const matrix = await A.gradeMatrix(ctx, ids);
+          if (!matrix.students.length) { st.style.color = 'var(--red)'; st.textContent = 'No students in scope.'; return; }
+          triggerDownload(A.buildGradesCsv(matrix, (id) => codeOf[id]),
+            A.exportFilename('Grades', 'csv'), 'text/csv');
+          st.style.color = 'var(--green)';
+          st.textContent = `✓ ${matrix.students.length} students, ${matrix.columns.length} assignments`;
+        } catch (e) {
+          st.style.color = 'var(--red)'; st.textContent = '⚠ ' + (e?.message || 'The export failed.') + ' No file was made.';
+        }
+      });
+
+      document.getElementById('ex-json').addEventListener('click', async () => {
+        const st = document.getElementById('bk-status');
+        st.style.color = 'var(--muted)'; st.textContent = 'Building…';
+        try {
+          const ids = await allSectionIds(ctx, { strict: true });
+          const backup = await A.buildBackup(ctx, ids);
+          triggerDownload(JSON.stringify(backup, null, 2),
+            A.exportFilename('Backup', 'json'), 'application/json');
+          st.style.color = 'var(--green)';
+          st.textContent = `✓ ${backup.enrollments.length} enrollments, ${backup.grades.length} grades`;
+        } catch (e) {
+          st.style.color = 'var(--red)'; st.textContent = '⚠ ' + (e?.message || 'The backup failed.') + ' No file was made.';
+        }
+      });
+
+      /* ── Publish everything that is due ────────────────────────────────────────
+       * Check, then publish. Nothing is written until the director has seen the table and pressed
+       * the second button, and that button checks AGAIN before it writes: a plan read an hour ago
+       * could zero a cadet who has since been given an extension. The rule is faculty-grade.js
+       * planPublish() — the same one the Grade page's Finalize & publish runs, over the course.
+       */
+      let pubPlan = null;
+
+      const pubRows = (items, kind) => items.filter(i => i.kind === kind)
+        .sort((a, b) => (a.position - b.position) || lastFirst(a.name).localeCompare(lastFirst(b.name)));
+      const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+      function pubList(title, rows, note) {
+        return `<details style="margin-top:14px"${rows.length <= 12 ? ' open' : ''}>
+          <summary style="cursor:pointer"><strong>${esc(title)}</strong></summary>
+          <div class="card-meta" style="margin:6px 0">${esc(note)}</div>
+          <div class="table-wrap"><table>
+            <thead><tr><th>Cadet ID</th><th>Name</th><th>Section</th><th>Lesson</th><th>Why</th></tr></thead>
+            <tbody>${rows.map(r => `<tr>
+              <td>${esc(r.studentId)}</td>
+              <td><a href="student.html?e=${encodeURIComponent(r.enrollmentId)}">${esc(lastFirst(r.name))}</a></td>
+              <td>${esc(codeOf[r.sectionId] || '')}</td>
+              <td>${esc(r.slug)}</td>
+              <td>${esc(r.kind === 'wrong-published' ? 'Published zero — their work is in'
+                                                     : (PUBLISH_HOLDS[r.reason] || r.reason))}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+        </details>`;
+      }
+
+      function renderPublishPreview() {
+        const box = document.getElementById('pub-preview');
+        const go = document.getElementById('pub-go');
+        const items = pubPlan?.items || [];
+        const p = items.filter(i => i.kind === 'publish').length;
+        const z = items.filter(i => i.kind === 'zero').length;
+        const held = pubRows(items, 'hold');
+        const wrong = pubRows(items, 'wrong-published');
+        const lessons = summarizePublishPlan(items);
+
+        go.style.display = (p + z) ? '' : 'none';
+        go.textContent = `Publish ${plural(p, 'grade')}` + (z ? ` and ${plural(z, 'zero')}` : '');
+
+        if (!lessons.length) {
+          box.innerHTML = `<div class="alert alert-success">Nothing is waiting. Every grade that is due
+            is published.</div>`;
+          return;
+        }
+        box.innerHTML = `
+          <div class="table-wrap"><table>
+            <thead><tr><th>Lesson</th><th style="text-align:right">Will publish</th>
+              <th style="text-align:right">Zeros to create</th><th style="text-align:right">Held back</th>
+              <th style="text-align:right">Published, but wrong</th></tr></thead>
+            <tbody>${lessons.map(l => `<tr>
+              <td>${esc(l.title)}</td>
+              <td style="text-align:right">${l.publish || '—'}</td>
+              <td style="text-align:right">${l.zero || '—'}</td>
+              <td style="text-align:right">${l.hold || '—'}</td>
+              <td style="text-align:right">${l.wrong ? `<b style="color:var(--red)">${l.wrong}</b>` : '—'}</td>
+            </tr>`).join('')}</tbody>
+          </table></div>
+          ${wrong.length ? pubList(`Published as a zero, but the cadet handed in (${wrong.length})`, wrong,
+            'These zeros were published before the work came in. Ask the instructor to Reopen and grade each one. This button does not change them.') : ''}
+          ${held.length ? pubList(`Held back (${held.length})`, held,
+            'Not published. Each one needs a person first — the reason is on the right.') : ''}`;
+      }
+
+      async function checkPublish(label) {
+        const st = document.getElementById('pub-status');
+        st.style.color = 'var(--muted)'; st.textContent = label;
+        const res = await loadPublishPlan(ctx);
+        if (res.error) {
+          pubPlan = null;
+          document.getElementById('pub-go').style.display = 'none';
+          st.style.color = 'var(--red)'; st.textContent = '⚠ Could not read the course: ' + res.error.message;
+          return false;
+        }
+        pubPlan = res;
+        st.textContent = '';
+        renderPublishPreview();
+        return true;
+      }
+
+      document.getElementById('pub-check').addEventListener('click', async (e) => {
+        e.currentTarget.disabled = true;
+        try { await checkPublish('Checking every lesson…'); }
+        finally { document.getElementById('pub-check').disabled = false; }
+      });
+
+      document.getElementById('pub-go').addEventListener('click', async () => {
+        const go = document.getElementById('pub-go');
+        const st = document.getElementById('pub-status');
+        go.disabled = true;
+        try {
+          if (!(await checkPublish('Checking again before publishing…'))) return;
+          const items = pubPlan.items.filter(i => i.kind === 'publish' || i.kind === 'zero');
+          if (!items.length) { st.textContent = 'Nothing is waiting any more.'; return; }
+          const p = items.filter(i => i.kind === 'publish').length, z = items.length - p;
+          const n = new Set(items.map(i => i.offeringId)).size;
+          if (!confirm(`Publish ${plural(p, 'grade')}` + (z ? ` and create ${plural(z, 'zero')}` : '') +
+              ` across ${plural(n, 'lesson')}?\n\nCadets see them immediately. Nothing already ` +
+              `published is changed, and nothing held back is published.`)) return;
+          st.style.color = 'var(--muted)'; st.textContent = 'Publishing…';
+          const out = await applyPublishPlan(ctx, items, pubPlan.offerings, { via: 'publish-all' });
+          bbData = null;              // the Blackboard fill reads published grades — make it re-read
+          const done = `${plural(out.published, 'grade')} published` +
+            (out.created ? `, ${plural(out.created, 'zero')} created` : '');
+          await checkPublish('Checking what is left…');
+          st.style.color = out.error ? 'var(--red)' : 'var(--green)';
+          st.textContent = out.error ? `⚠ Stopped after ${done}: ${out.error.message}` : `✓ ${done}.`;
+        } finally { go.disabled = false; }
+      });
+
+      /* ── Fill a Blackboard file ──────────────────────────────────────────────
+       * Preview-then-commit, the same shape as the roster import above and for the same
+       * reason: a file nobody has looked at should not be acted on. Nothing is written to
+       * the database at any point — this reads `grades` and hands back files.
+       */
+      const bbFiles = [];                // one entry per uploaded file, in upload order
+      let bbData = null;                 // { offerings, roster, lookup } — loaded once, lazily
+
+      async function loadFillData() {
+        if (bbData) return bbData;
+        const matrix = await A.gradeMatrix(ctx, await allSectionIds(ctx, { strict: true }));
+        const byCadet = Object.fromEntries(matrix.students.map(s => [s.studentId, s.enrollmentId]));
+        bbData = {
+          // The lesson number comes off the SLUG (`preflight-08`), which is stable, rather than
+          // off the title, which a director may reword at any time.
+          offerings: matrix.columns.map(c => ({
+            id: c.id, title: c.title, lesson: BB.lessonNumberOf(c.slug ?? '') })),
+          roster: matrix.students.map(s => ({
+            studentId: s.studentId, track: trackOf[s.sectionId] || '?',
+            sectionCode: codeOf[s.sectionId] || '' })),
+          lookup: (cadetId, offeringId) => {
+            const enr = byCadet[cadetId];
+            return enr ? matrix.cell(enr, offeringId) : null;
+          },
+        };
+        return bbData;
+      }
+
+      // readAsText() would be the obvious call and it is the wrong one: the File API decodes
+      // "UTF-8 with BOM" by CONSUMING the BOM, so readFile() never sees one and the file we hand
+      // back has lost its first three bytes. Node's readFileSync(path,'utf8') keeps it, so the
+      // unit tests were green while every browser download silently dropped it (found on the real
+      // 2026-08-28 export). Decoding the bytes ourselves with ignoreBOM leaves the marker in the
+      // string for readFile() to detect and strip deliberately.
+      function bbRead(file) {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(e.target.result);
+          let data;
+          try { data = await loadFillData(); } catch (err) {
+            // The roster could not be read, so the file cannot be matched to anyone. Say so; do not show an empty match.
+            const box = document.getElementById('bb-preview');
+            if (box) box.innerHTML = `<div class="alert alert-error">${esc(err?.message || 'The roster could not be loaded.')}</div>`;
+            return;
+          }
+          const parsed = BB.readFile(text, data.offerings);
+          const i = bbFiles.findIndex(f => f.name === file.name);
+          const entry = { name: file.name, label: file.name, ...parsed };
+          if (i >= 0) bbFiles[i] = entry; else bbFiles.push(entry);   // re-picking replaces
+          renderBbPreview();
+        };
+        reader.readAsArrayBuffer(file);
+      }
+
+      {
+        const dz = document.getElementById('bb-dz');
+        const input = document.getElementById('bb-file');
+        if (dz && input) {
+          dz.addEventListener('click', () => input.click());
+          input.addEventListener('change', (e) => {
+            [...e.target.files].forEach(bbRead);
+            e.target.value = '';          // so re-picking the same file fires again
+          });
+          dz.addEventListener('dragover', (e) => { e.preventDefault(); dz.classList.add('drag-over'); });
+          dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+          dz.addEventListener('drop', (e) => {
+            e.preventDefault(); dz.classList.remove('drag-over');
+            [...e.dataTransfer.files].forEach(bbRead);
+          });
+        }
+      }
+
+      /** One file's line in the preview: what we found, or why we refused it. */
+      function bbFileBlock(f) {
+        if (f.error) {
+          return `<div class="card-meta" style="color:var(--red)">
+            <strong>${esc(f.name)}</strong><br>${esc(f.error)}</div>`;
+        }
+        const matched = f.columns.filter(c => c.offeringId);
+        const dupes = f.columns.filter(c => c.note);
+        const secs = [...new Set(f.ids.map(id => (bbData.roster.find(r => r.studentId === id) || {}).sectionCode)
+                                      .filter(Boolean))].sort();
+        return `<div class="card-meta" style="margin-bottom:10px">
+          <strong>${esc(f.name)}</strong>: ${f.rows} cadet row(s),
+          ${matched.length} preflight column(s) matched.
+          ${secs.length ? `<div>Sections in this file: <strong>${secs.map(esc).join(', ')}</strong></div>` : ''}
+          ${dupes.length ? `<div style="color:var(--red)">${dupes.map(c =>
+            `Skipped “${esc(c.header)}” — ${esc(c.note)}.`).join('<br>')}</div>` : ''}
+          ${f.unmatchedOfferings.length ? `<div>No column here for: ${
+            f.unmatchedOfferings.map(o => esc(o.title)).join('; ')}. Those grades will not post.</div>` : ''}
+        </div>`;
+      }
+
+      function renderBbPreview() {
+        const box = document.getElementById('bb-preview');
+        if (!box) return;
+        if (!bbFiles.length) { box.innerHTML = ''; return; }
+
+        const usable = bbFiles.filter(f => !f.error);
+        const x = BB.checkFiles(usable.map(f => ({ label: f.name, ids: f.ids })),
+                                bbData ? bbData.roster : []);
+
+        // Real errors — every one of these means a grade goes somewhere wrong, or nowhere.
+        const problems = [];
+        for (const [a, b] of x.duplicateFiles) problems.push(
+          `<strong>${esc(a)}</strong> and <strong>${esc(b)}</strong> hold the same cadets — `
+          + 'the same export was probably chosen twice.');
+        for (const p of x.partial) problems.push(
+          `<strong>${esc(p.sectionCode)} is only partly in the upload</strong> — `
+          + `${p.present} of ${p.enrolled} cadets. Missing: ${p.missing.slice(0, 10).join(', ')}`
+          + `${p.missing.length > 10 ? ', …' : ''}. Their grades will not post.`);
+        if (x.inMultiple.length) problems.push(
+          `${x.inMultiple.length} cadet(s) appear in more than one file: `
+          + x.inMultiple.slice(0, 10).map(s => `${s.studentId} (${esc(s.sectionCode)})`).join(', '));
+        if (x.notOnRoster.length) problems.push(
+          `${x.notOnRoster.length} ID(s) in the file(s) are not enrolled in this course — `
+          + 'those rows are left untouched.');
+
+        // NOT an error: a section handled by another instructor, in their own Blackboard course.
+        const uncoveredNote = x.uncovered.length ? `
+          <div class="card-meta" style="margin-top:8px">
+            <strong>${x.uncovered.length} section(s) are in none of these files</strong>
+            (${x.uncovered.reduce((n, s) => n + s.enrolled, 0)} cadets):
+            ${x.uncovered.map(s => `${esc(s.sectionCode)} (${s.enrolled})`).join(', ')}.
+            If another instructor runs those in a separate Blackboard course, they need their own
+            file — nothing here will post a grade for them.
+          </div>` : '';
+
+        box.innerHTML = `
+          ${bbFiles.map(bbFileBlock).join('')}
+          <div class="card-meta" style="margin-top:10px">
+            Covering <strong>${x.coveredCadets}</strong> of ${x.rosterSize} enrolled cadets
+            across ${x.covered.length} fully-matched section(s).
+          </div>
+          ${uncoveredNote}
+          <div class="card-meta" style="margin-top:8px">
+            ${problems.length
+              ? `<div style="color:var(--red)">${problems.map(p => `<div>${p}</div>`).join('')}</div>`
+              : '<span style="color:var(--green)">✓ Every section present in these files is complete.</span>'}
+          </div>
+          <div class="row wrap" style="gap:14px;margin-top:12px">
+            <button class="btn btn-primary" id="bb-go" ${usable.length ? '' : 'disabled'}>
+              Download preflight file${usable.length > 1 ? 's' : ''}</button>
+            <button class="btn btn-secondary" id="bb-clear">Clear</button>
+            <span id="bb-status" style="font-size:0.85em"></span>
+          </div>`;
+
+        document.getElementById('bb-clear').addEventListener('click', () => {
+          bbFiles.length = 0; renderBbPreview();
+        });
+        document.getElementById('bb-go').addEventListener('click', () => {
+          const st = document.getElementById('bb-status');
+          const done = [];
+          const empty = [];
+          for (const f of usable) {
+            const r = BB.fillGrid(f.grid, f.idColumn.index, f.matched, bbData.lookup,
+                                  { decimals: f.format.decimals });
+            // Only the columns we are posting leave this page — the identity block plus the
+            // preflights that actually carry a score. Everything else is dropped, because
+            // Blackboard reads a passed-through blank as "erase this" and the export goes stale
+            // the moment it is downloaded. See narrowToPreflights() for what this cost to learn.
+            const n = BB.narrowToPreflights(r.grid, f.matched, f.idColumn.index);
+            if (!n.postedColumns.length) { empty.push(f.name); continue; }
+            // The file goes back out in exactly the shape it came in — its own line endings, its
+            // own BOM, its own trailing newline. See toCsv().
+            // Named after the file it came from, because with several in flight "which one is
+            // this?" is the question a generic name cannot answer.
+            triggerDownload(BB.toCsv(n.grid, f.delimiter, f.format),
+              f.name.replace(/\.csv$/i, '') + '_preflights.csv', 'text/csv');
+            done.push(`${f.name}: ${r.filled} scores in ${n.postedColumns.length} column(s), `
+                    + `${n.dropped} other column(s) left out`);
+          }
+          st.style.color = done.length ? 'var(--green)' : 'var(--red)';
+          st.innerHTML = (done.length ? '✓ ' + done.join(' · ') : '')
+            + (empty.length ? `${done.length ? '<br>' : ''}<span style="color:var(--red)">`
+                + `No finalized preflight scores yet for ${esc(empty.join(', '))} — nothing to `
+                + `post, so no file was produced.</span>` : '');
+        });
+      }
+    }
+
+    /* ───────────────────────────── Modal ───────────────────────────── */
+    function openModal(title, body, okLabel, handler) {
+      document.getElementById('mk-title').textContent = title;
+      document.getElementById('mk-body').innerHTML = body;
+      document.getElementById('mk-ok').textContent = okLabel;
+      document.getElementById('mk-error').textContent = '';
+      onConfirm = handler;
+      document.getElementById('mk-modal').classList.add('open');
+    }
+    function wireModal() {
+      const m = document.getElementById('mk-modal');
+      wireModalDismiss(m, () => m.classList.remove('open'));
+      document.getElementById('mk-ok').addEventListener('click', async () => {
+        const btn = document.getElementById('mk-ok');
+        const err = document.getElementById('mk-error');
+        err.textContent = '';
+        btn.disabled = true;
+        const problem = await onConfirm?.();
+        btn.disabled = false;
+        if (problem) { err.textContent = problem; return; }
+        m.classList.remove('open');
+      });
+    }
+  </script>
+</body>
+</html>

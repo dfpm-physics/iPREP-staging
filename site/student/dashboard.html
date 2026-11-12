@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js 'sha256-O1yQJpi2tk+FUEfwpxi0rUB9mwFk14n/BCfN/1plBv8=' 'sha256-y+LKA7TZpIwcx0pJHKuXky0z0Ito1wCh6DfOl7ivJTU='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://wkibeptktbnaddfynrwr.supabase.co https://dfpm-physics.github.io; connect-src 'self' https://wkibeptktbnaddfynrwr.supabase.co wss://wkibeptktbnaddfynrwr.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard · PREP</title>
+  <script>(function(){try{var s=localStorage.getItem('cp.theme');var m=s||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(m==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <link rel="stylesheet" href="../css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O" crossorigin="anonymous"></script>
+  <script src="../js/config.js"></script>
+</head>
+<body>
+  <header id="topnav"></header><script src="../js/nav-shell.js"></script>
+  <main class="page-wide" id="main">
+    <div class="center-load"><span class="spinner"></span><span>Loading your dashboard…</span></div>
+  </main>
+
+  <script type="module">
+    import { bootstrap } from '../js/auth.js';
+    import { renderNav } from '../js/nav.js';
+    import { initTheme } from '../js/theme.js';
+    import { loadStudentLessonDashboard, STATE } from '../js/student-lessons.js';
+    import { releaseNote } from '../js/schema.js';
+    import { pointsText, scoreText, gradingNote, totalView, modeLabel } from '../js/student-view.js';
+    import { esc, iconHTML, relativeDue, deadlineClass, fmtDateTime, runPage, guarded } from '../js/util.js';
+
+    const ctx = await bootstrap({ require: 'student' });
+    runPage(ctx, () => { initTheme(); renderNav(ctx, { active: 'dashboard', onCourseChange: guarded(() => main()) }); return main(); });
+
+    const firstName = (ctx?.studentRow?.name || '').split(/\s+/)[0] || 'Cadet';
+
+    async function main() {
+      const root = document.getElementById('main');
+      const vm = await loadStudentLessonDashboard(ctx);
+
+      if (vm.noCourse) {
+        root.innerHTML = `
+          <div class="page-head"><h1>Welcome, ${esc(firstName)}</h1></div>
+          <div class="alert alert-warn">Your section isn't assigned to a course yet. Ask your
+          instructor to add you to a section so your assignments appear here.</div>`;
+        return;
+      }
+
+      root.innerHTML = `
+        <div class="page-head">
+          <h1>Welcome back, ${esc(firstName)}</h1>
+          <div class="sub">${esc(ctx.courseTitleOf(ctx.currentOffering))} · Section ${esc(ctx.sectionCodeOf(ctx.sectionIds[0]) || '—')}${ctx.currentIsPast ? ' · Past term, read only' : ''}</div>
+        </div>
+        ${vm.totalError ? `<div class="alert alert-warn">Your running total could not be loaded: ${esc(vm.totalError)}</div>` : ''}
+        ${nextActionBlock(vm)}
+        ${statTiles(vm.stats, vm)}
+        ${upNextSection(vm.upNext, vm.lockedCount, vm)}
+        ${vm.missed.length ? missedSection(vm.missed) : ''}
+        ${gradedSection(vm.graded)}`;
+    }
+
+    /* The next piece of work, ahead of the totals. It is chosen from the lessons this page already loaded
+     * (vm.toDo: not started or a saved draft): the one whose deadline comes first, undated work last. Nothing
+     * is shown that the row does not hold, and the action goes to the same page as every list row, which shows
+     * both ways of doing the work when both exist, so no way is preferred here. Overdue work is not
+     * featured; it has its own section below. */
+    function pickNext(items) {
+      const t = (l) => (l.due ? l.due.getTime() : Infinity);
+      return [...items].sort((a, b) => t(a) - t(b))[0] || null;
+    }
+    function nextActionBlock(vm) {
+      const l = pickNext(vm.toDo || []);
+      if (!l) return '';
+      const draft = l.state === STATE.DRAFT;
+      const due = l.due ? `Due ${fmtDateTime(l.due)} · ${relativeDue(l.due)}` : 'No due date';
+      return `<section class="next-action" aria-labelledby="na-title">
+        <div class="na-eyebrow">Next up</div>
+        <h2 class="na-title" id="na-title">${l.lesson_number != null ? esc(l.lesson_number) + '. ' : ''}${esc(l.title)}</h2>
+        <div class="na-meta">
+          <span class="deadline ${deadlineClass(l.due, l.isPast)}">${esc(due)}</span>
+          <span class="na-status"><span class="status-dot ${l.dot}"></span>${draft ? 'Draft saved' : 'Not started'}</span>
+        </div>
+        <a class="btn btn-primary" href="lessons.html?l=${encodeURIComponent(l.id)}">${draft ? 'Continue' : 'Open assignment'}</a>
+      </section>`;
+    }
+
+    function statTiles(s, vm) {
+      const tile = (accent, icon, emoji, num, label) => `
+        <div class="stat-tile accent-${accent}">
+          <div class="stat-ic">${iconHTML(icon, emoji, 'ic')}</div>
+          <div class="stat-body"><div class="stat-num">${num}</div><div class="stat-label">${esc(label)}</div></div>
+        </div>`;
+      // The running total is the database's (my_course_total), printed as it came back. A failed read
+      // says so; it is never shown as 0.
+      const tv = totalView(vm.total);
+      const points = vm.totalError ? 'Unavailable' : (tv && tv.possible ? `${tv.earned}/${tv.possible}` : '—');
+      // Routine counts stay neutral; colour is spent only where something needs attention.
+      return `<div class="stat-grid quiet">
+        ${tile('none', 'todo',    '📝', s.toDo, 'To do')}
+        ${tile(s.missed ? 'red' : 'none', 'overdue', '⏰', s.missed, 'Past due')}
+        ${tile('none', 'award',   '🏅', points, 'Points so far')}
+        ${tile('none', 'done',    '✅', s.graded, 'Graded')}
+      </div>`;
+    }
+
+    function statusText(l) {
+      switch (l.state) {
+        case STATE.DRAFT:     return 'Draft saved · ' + relativeDue(l.due);
+        case STATE.SUBMITTED: return 'Submitted · editable until due';
+        case STATE.COMPLETE:  return 'Complete · interactive';
+        case STATE.GRADING:   return 'Submitted · grading in progress';
+        case STATE.GRADED:    return `Graded ${scoreText(l.completion.points, l.points) || pointsText(l.completion.points)}`;
+        case STATE.EXCUSED:   return 'Excused · left out of your total';
+        default:              return relativeDue(l.due);
+      }
+    }
+
+    function lessonItem(l) {
+      return `<a class="list-item" href="lessons.html?l=${encodeURIComponent(l.id)}">
+        <span class="status-dot ${l.dot}"></span>
+        <div class="li-body">
+          <div class="li-title">${l.lesson_number != null ? esc(l.lesson_number) + '. ' : ''}${esc(l.title)}</div>
+          <div class="li-meta"><span>${esc([modeLabel(l), pointsText(l.points)].filter(Boolean).join(' · '))}</span>
+            <span class="deadline ${deadlineClass(l.due, l.isPast)}">${esc(statusText(l))}</span></div>
+        </div>
+        <span class="li-arrow">›</span>
+      </a>`;
+    }
+
+    /* `locked` — assignments the release window is holding back (schema.js releaseNote).
+     * It matters most in the empty state: "All caught up. Nice work." is the wrong thing to tell
+     * a cadet whose next four preflights simply have not opened yet, because it invites them to
+     * stop checking. With work still to come the heading says so instead. */
+    function upNextSection(allItems, lockedCount, vm) {
+      const locked = releaseNote(lockedCount);
+      // The featured assignment above is not listed twice.
+      const featured = pickNext(vm.toDo || []);
+      const items = featured ? allItems.filter(l => l.id !== featured.id) : allItems;
+      if (featured && !items.length) {
+        return locked ? `<div class="field-hint" style="margin-bottom:18px">${esc(locked)}</div>` : '';
+      }
+      // "All caught up" is only said when it is true: nothing open AND nothing past due.
+      const body = items.length
+        ? `<div class="list">${items.map(lessonItem).join('')}</div>`
+        : locked
+        ? `<div class="empty-state"><div class="es-ic">${iconHTML('due-soon', '⏳', 'ic')}</div><h3>Nothing open right now</h3>
+             <p>${esc(locked)}</p></div>`
+        : vm.missed.length
+        ? `<div class="empty-state"><h3>No open assignments</h3>
+             <p>Past-due work is listed below.</p></div>`
+        : `<div class="empty-state"><div class="es-ic">${iconHTML('rocket', '🚀', 'ic')}</div><h3>All caught up</h3>
+             <p>You have no open assignments right now. Nice work.</p></div>`;
+      return `<section class="dash-section">
+        <div class="section-head"><h2>${iconHTML('due-soon', '⏳', 'ic')} ${featured ? 'Also open' : 'Up next'}</h2>
+          ${items.length ? `<span class="count-pill">${items.length}</span>` : ''}
+          <span class="grow"></span>
+          <a class="btn btn-ghost btn-sm" href="lessons.html">View all</a>
+        </div>${body}
+        ${items.length && locked ? `<div class="field-hint" style="margin-top:10px">${esc(locked)}</div>` : ''}</section>`;
+    }
+
+    function missedSection(items) {
+      return `<section class="dash-section">
+        <div class="section-head"><h2>Past due</h2><span class="count-pill">${items.length}</span></div>
+        <div class="list">${items.map(lessonItem).join('')}</div></section>`;
+    }
+
+    // `completion.path` is null when the grade is a zero for work that was never submitted, so
+    // there is no version to name. Saying "written" there would credit a cadet with an attempt
+    // they did not make (student-lessons.js, the completion invariant).
+    function pathWord(c) {
+      if (!c?.path) return 'nothing submitted';
+      return c.path === 'interaction' ? 'interactive' : 'written';
+    }
+
+    function gradedSection(items) {
+      if (!items.length) return '';
+      const badge = (l) => {
+        const pts = l.completion.points ?? 0, max = l.points;
+        const cls = max != null && pts >= max ? 'full' : pts > 0 ? 'partial' : 'zero';
+        return `<span class="score-badge ${cls}">${max != null ? `${pts}/${max}` : pts}</span>`;
+      };
+      return `<section class="dash-section">
+        <div class="section-head"><h2>${iconHTML('done', '✅', 'ic')} Recently graded</h2><span class="count-pill">${items.length}</span></div>
+        <div class="list">${items.slice(0, 5).map(l => `
+          <a class="list-item" href="lessons.html?l=${encodeURIComponent(l.id)}">
+            <span class="status-dot green"></span>
+            <div class="li-body"><div class="li-title">${esc(l.title)}</div>
+              <div class="li-meta">${esc([gradingNote(l.gradingMode), pathWord(l.completion)].filter(Boolean).join(' · '))}</div></div>
+            <div class="li-right">${badge(l)}<span class="li-arrow">›</span></div>
+          </a>`).join('')}</div></section>`;
+    }
+  </script>
+</body>
+</html>

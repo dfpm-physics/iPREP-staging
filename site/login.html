@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js 'sha256-O1yQJpi2tk+FUEfwpxi0rUB9mwFk14n/BCfN/1plBv8=' 'sha256-oxMiYfCGMW+XeJHIlxWpQ5Hw45Mq+MehK+bT4T0JzxE='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://wkibeptktbnaddfynrwr.supabase.co https://dfpm-physics.github.io; connect-src 'self' https://wkibeptktbnaddfynrwr.supabase.co wss://wkibeptktbnaddfynrwr.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign in · PREP</title>
+  <!-- no-flash theme: set data-theme before the stylesheet paints -->
+  <script>(function(){try{var s=localStorage.getItem('cp.theme');var m=s||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(m==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O" crossorigin="anonymous"></script>
+  <script src="js/config.js"></script>
+</head>
+<body>
+  <button class="theme-toggle login-theme-toggle" data-theme-toggle><span data-theme-icon>🌙</span></button>
+
+  <div class="id-screen">
+    <div class="id-card">
+      <div class="crest">⚛️</div>
+      <h1>PREP</h1>
+      <p class="crest-sub">USAFA Physics</p>
+      <p>Sign in with your academy email and password.</p>
+
+      <div id="error" class="alert alert-error" style="display:none"></div>
+
+      <form id="login-form" autocomplete="on">
+        <div class="field">
+          <label for="identifier">Email address</label>
+          <input id="identifier" type="email" inputmode="email" autocomplete="username"
+                 placeholder="first.last@afacademy.af.edu" required>
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" type="password" autocomplete="current-password" placeholder="Password" required>
+        </div>
+        <button id="submit" class="btn btn-primary btn-block" type="submit">Sign in</button>
+      </form>
+
+      <details class="login-help">
+        <summary>Need help signing in?</summary>
+        <p>Use the email address your account was created with.</p>
+        <p>Forgot your password? Cadets: ask your instructor to reset it.
+          Instructors: ask a system admin.</p>
+      </details>
+      <p class="login-foot">PREP is the Pre-lesson Readiness Engagement Platform.</p>
+    </div>
+    <div class="physics-strip" aria-hidden="true">
+      <img src="media/icons/ic-atom.png"   alt="">
+      <img src="media/icons/ic-bolt.png"   alt="">
+      <img src="media/icons/ic-wave.png"   alt="">
+      <img src="media/icons/ic-magnet.png" alt="">
+    </div>
+  </div>
+
+  <script type="module">
+    import { db } from './js/supabase.js';
+    import { initTheme } from './js/theme.js';
+    import { safeNext } from './js/safe-next.js';
+
+    initTheme();
+
+    // A decorative icon that is missing is hidden. (Done here and not as an onerror attribute, which the page's
+    // content security policy does not allow. A load that failed before this ran shows as complete with no width.)
+    document.querySelectorAll('.physics-strip img').forEach((img) => {
+      const hide = () => { img.style.display = 'none'; };
+      if (img.complete && img.naturalWidth === 0) hide(); else img.addEventListener('error', hide);
+    });
+
+    const params = new URLSearchParams(location.search);
+    const errEl  = document.getElementById('error');
+
+    // Only a path on this site is followed after sign-in (see js/safe-next.js).
+    const nextUrl = () => safeNext(params.get('next'));
+    function showError(msg) { errEl.textContent = msg; errEl.style.display = ''; }
+
+    if (params.get('err') === 'notreg') {
+      showError('That account is not registered as a student or instructor. Contact your course director.');
+    }
+    // auth.js sends `stale` when the browser was holding a session the server no longer has —
+    // which is what a password change leaves behind. Nothing is wrong with the account, so say
+    // that: the alternative is someone reading a bare "signed out" as a second failure.
+    if (params.get('err') === 'stale') {
+      showError('Your sign-in expired — this happens right after a password change. Sign in with your new password.');
+    }
+
+    // Already signed in? Skip the form.
+    (async () => {
+      const { data: { session } } = await db.auth.getSession();
+      if (session) location.replace(nextUrl());
+    })();
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errEl.style.display = 'none';
+      const email = document.getElementById('identifier').value.trim();
+      const pw  = document.getElementById('password').value;
+      if (!email || !pw) { showError('Enter your email address and password.'); return; }
+
+      // No more "bare cadet ID gets @usafa.edu appended". That convenience existed because the
+      // address WAS the cadet ID — provisioning fabricated <cadet_id>@usafa.edu. Accounts now
+      // carry the real address from the registrar export, so there is nothing to derive, and
+      // guessing a domain here would just produce a confusing failure for every new cadet.
+      // Cadets provisioned before 2026-07-21 still sign in with the old fabricated address,
+      // which they type in full like any other.
+      if (!email.includes('@')) {
+        showError('Enter your full email address, including the part after the @.');
+        return;
+      }
+
+      const btn = document.getElementById('submit');
+      btn.disabled = true; btn.innerHTML = '<span class="spinner on-dark"></span> Signing in…';
+
+      const { error } = await db.auth.signInWithPassword({ email, password: pw });
+      if (error) {
+        btn.disabled = false; btn.textContent = 'Sign in';
+        // One message for every auth failure, on purpose: distinguishing "no such account" from
+        // "wrong password" turns this form into a roster oracle, which is the legacy bug
+        // site/index.html shipped and account.js warns against porting.
+        showError(/invalid login/i.test(error.message)
+          ? 'Incorrect email or password.'
+          : 'Sign-in failed: ' + error.message);
+        return;
+      }
+      location.replace(nextUrl());
+    });
+  </script>
+</body>
+</html>

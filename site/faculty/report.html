@@ -1,0 +1,1823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.17/purify.min.js https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js 'sha256-O1yQJpi2tk+FUEfwpxi0rUB9mwFk14n/BCfN/1plBv8=' 'sha256-rFgiUaiyfNVcrTKMB+0hisaaiLTh0khs/JT7T6NIN7s='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://wkibeptktbnaddfynrwr.supabase.co https://dfpm-physics.github.io; connect-src 'self' https://wkibeptktbnaddfynrwr.supabase.co wss://wkibeptktbnaddfynrwr.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Report · PREP</title>
+  <script>(function(){try{var s=localStorage.getItem('cp.theme');var m=s||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(m==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <link rel="stylesheet" href="../css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O" crossorigin="anonymous"></script>
+  <script src="../js/config.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.0/marked.min.js" integrity="sha384-NNQgBjjuhtXzPmmy4gurS5X7P4uTt1DThyevz4Ua0IVK5+kazYQI1W27JHjbbxQz" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.17/purify.min.js" integrity="sha512-2wT0W6vojz3cJuLoa/DxrPVQRinkfRjFWMWIDK4NghTqObEhpem1nEkeK0d9ZE+/hyvfMNuJZlfxM4LsRgeoSA==" crossorigin="anonymous"></script>
+</head>
+<body>
+  <header id="topnav"></header><script src="../js/nav-shell.js"></script>
+  <main class="page-wide" id="main">
+    <a class="report-back" href="dashboard.html" id="report-back">‹ Dashboard</a>
+
+    <!-- With no ?i= the page lists this course's assignments to pick from. -->
+    <div id="report-picker" hidden></div>
+
+    <!-- Lesson rollup as the page body: a single course-wide summary (no per-student list).
+         Drill into individual students only through the header flag pills, which open the
+         flagged-students modal below. (Ported from the interactions report modal.) -->
+    <div class="report-rollup" id="report-body">
+      <!-- Tinted header: Oswald title + completion badge, then flag pills + the scope control. -->
+      <header class="lesson-head">
+        <div class="lh-top">
+          <h2 class="lh-title grow" id="rm-title">Assignment report</h2>
+          <div id="rm-comp"></div>
+        </div>
+        <div class="lh-sub">
+          <div class="hflags grow" id="rm-flagbar"></div>
+          <div class="lh-scope" id="rm-scope"></div>
+        </div>
+      </header>
+
+      <!-- Course-wide rollup, numeric, computed live from report_data (no AI): effort + radar
+           tiles · AI placeholders · understanding by objective · student responses. -->
+      <div class="lesson-summary" id="rm-aggregate"></div>
+
+      <!-- Analysis export lives on the bottom row, below the summary. -->
+      <div class="row" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border);justify-content:flex-end">
+        <button class="btn btn-secondary btn-sm" id="rm-export"
+          title="Download a combined Markdown report (all your sections for this assignment) to hand to the analysis AI">Export for analysis ⬇</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- Flagged-students modal: opened from a header flag pill. Lists the matching students by
+       name + section; clicking one opens their structured summary (student-modal). -->
+  <div class="modal-backdrop" id="flag-modal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-head"><h2 id="fm-title">Flagged students</h2><button class="modal-close" data-close>×</button></div>
+      <div id="fm-body"></div>
+    </div>
+  </div>
+
+  <!-- One student's structured summary (stacks above the flag list); links to the full report. -->
+  <div class="modal-backdrop" id="student-modal" style="z-index:75">
+    <div class="modal" style="max-width:640px">
+      <div class="modal-head"><h2 id="sm-title">Student</h2><button class="modal-close" data-close>×</button></div>
+      <div id="sm-body"></div>
+    </div>
+  </div>
+
+  <!-- Full Markdown report for one student (inert, user-controllable blob — sanitized at render). -->
+  <div class="modal-backdrop" id="fullreport-modal">
+    <div class="modal" style="max-width:760px">
+      <div class="modal-head"><h2 id="fr-title">Report</h2><button class="modal-close" data-close>×</button></div>
+      <div class="md-render" id="fr-body"></div>
+    </div>
+  </div>
+
+  <!-- Grant an extension to one or many non-submitters, without leaving the rollup. The list of
+       who has not submitted is right here; making the reader carry names to another page to act on
+       them is what made the legacy version inert. One reason covers the whole batch: `reason` is
+       NOT NULL and non-blank-checked (migration 007), and a batch granted for one cause genuinely
+       shares one cause. -->
+  <div class="modal-backdrop" id="ext-modal" style="z-index:80">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-head"><h2 id="xm-title">Grant extension</h2><button class="modal-close" data-close>×</button></div>
+      <div id="xm-who" class="muted" style="font-size:0.86em;margin-bottom:12px"></div>
+      <div class="field">
+        <label for="xm-due">New deadline</label>
+        <input type="datetime-local" id="xm-due">
+      </div>
+      <div class="field">
+        <label for="xm-reason">Reason <span class="muted" style="font-weight:400">· required, and recorded</span></label>
+        <input type="text" id="xm-reason" placeholder="e.g. approved absence — team travel" maxlength="200">
+      </div>
+      <div class="row" style="justify-content:flex-end;gap:8px;margin-top:14px">
+        <button class="btn btn-ghost" data-close>Cancel</button>
+        <button class="btn btn-primary" id="xm-save">Grant</button>
+      </div>
+      <div id="xm-status" class="muted" style="font-size:0.82em;min-height:1.2em;margin-top:8px"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { bootstrap } from '../js/auth.js';
+    import { renderNav } from '../js/nav.js';
+    import { initTheme } from '../js/theme.js';
+    import { esc, lastFirst, runPage, wireModalDismiss, infoHTML } from '../js/util.js';
+    import * as I from '../js/faculty-rollup.js';
+    // Extensions are granted from the "Did not submit" list. Reusing the Grade tab's writer rather
+    // than composing a second upsert here: one (enrollment, offering) UNIQUE key, one code path, so
+    // the two surfaces cannot drift on what an extension is.
+    import * as G from '../js/faculty-grade.js';
+    // P1.5 — which of the two understanding-by-objective renderings this person wants.
+    import { getPref } from '../js/prefs.js';
+
+    // Live bandwidth knobs for the objective-understanding histogram KDE (lrFine5). These are the
+    // active defaults; the director-only floating tuner (mountKdeTuner) lets a director nudge them
+    // on the page and copy a fresh line. To bake a value in permanently, just edit it here.
+    const KDE = { H0: 0.49, HMIN: 0.30, HMAX: 0.45 };
+
+    const ctx = await bootstrap({ require: 'faculty' });
+    // Mount the live tuner only when a director explicitly asks for it with ?kde=1.
+    //
+    // It was previously mounted for every director on every rollup, where it reads as part of the
+    // product rather than the dev tool it is — a floating panel of unexplained sliders over a page
+    // instructors are meant to read. Hidden, not deleted: it is the only way to retune the KDE
+    // constants, and nothing else regenerates that const line.
+    //
+    // Deliberately a query param and not an account preference: this leaves no persisted state, so
+    // a director cannot switch it on, forget, and file the panel as a bug three weeks later.
+    const kdeTunerRequested = new URLSearchParams(location.search).get('kde') === '1';
+    // runPage, not a bare init() — and this page was the last data-dense faculty surface without
+    // it. Everything below start() is async and the page opens on a `.center-load` spinner, so a
+    // throw anywhere between the spinner and the first render left it turning with the cause
+    // visible only in a console nobody has open. The two .catch() handlers in showReport() were
+    // each added after an incident of exactly that kind; neither covers the ENTRY POINT, which is
+    // where a rejected loadManager or a failing renderScope() lands. A page that fails should say
+    // so (util.js, "Failure surfacing").
+    //
+    // It also fixes a latent ordering hazard: runPage defers init through a microtask, so the
+    // module-level `let vm = …` declarations below are initialised before anything can read them.
+    // The bare call worked only because start() happened to reach an `await` first.
+    runPage(ctx, async () => {
+      await init();
+      if (kdeTunerRequested && ctx.isDirectorForCurrent?.()) mountKdeTuner();
+    });
+
+    let vm = null, reportInteraction = null;
+    // Structured report data for the open lesson: rows = null while loading, [] once loaded.
+    let reportRows = null, reportByStudent = {};
+    // Cohort AI analysis keyed by scope — a section uuid, 'instr:<uuid>', or '__all__'; null while
+    // loading. Absent/empty → the rollup keeps today's "coming soon" placeholders.
+    let reportAnalysis = null;
+    // Offering-level, not per scope. `reportAliases` folds coined misconception-id variants onto a
+    // canonical id (the clustering /lesson-aggregate used to do in prose and throw away);
+    // `reportGlossary` backfills a label/description for ids whose raw rows carried none.
+    let reportAliases = null, reportGlossary = null;
+    // Set when the structured-data query REJECTED, as opposed to returning nothing. The panel has
+    // to be able to tell those apart: "no submissions yet" is a fact about the cohort, and "the
+    // query failed" is a fault the reader should report rather than plan a lesson around.
+    let reportLoadError = null;
+
+    // Awaited, not fired and forgotten: runPage()'s catch only covers what init() hands back, so
+    // a bare `start()` here would put every failure in the load path back outside the guard.
+    async function init() {
+      initTheme();
+      // Report is not a nav destination — switching course leaves this lesson's context, so
+      // send the user back to the interactions list rather than show a stale cross-course rollup.
+      // With no assignment in the address this page is the Reports list, and switching course re-reads the list.
+      const picking = !new URLSearchParams(location.search).get('i');
+      renderNav(ctx, { active: picking ? 'report' : '', onCourseChange: () => { if (picking) return start(); location.href = 'dashboard.html'; } });
+      wireModals();
+      await start();
+    }
+
+    function wireModals() {
+      ['flag-modal', 'student-modal', 'fullreport-modal', 'ext-modal'].forEach(id => {
+        const m = document.getElementById(id);
+        wireModalDismiss(m, () => m.classList.remove('open'));
+      });
+      document.getElementById('rm-export').addEventListener('click', exportCorpus);
+      // Wired once here, not in wireNotSubmitted(): the panel re-renders on every scope change and
+      // re-binding a modal's Save on each pass would fire it once per render.
+      document.getElementById('xm-save').addEventListener('click', saveExt);
+      document.getElementById('xm-reason').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); saveExt(); }
+      });
+    }
+
+    // The lesson is chosen entirely by the URL (?i=<offering id>, optional &section=). No picker — the
+    // page is only ever reached by a link from the dashboard. No key → back to the dashboard.
+    // (The interactions page that used to be the other entry point was deleted 2026-07-20.)
+    async function start() {
+      const params = new URLSearchParams(location.search);
+      const interactionId = params.get('i');
+      const section = params.get('section');
+      if (!interactionId) { await showPicker(); return; }
+      if (!ctx.currentOffering) {
+        document.getElementById('rm-title').textContent = 'Report';
+        document.getElementById('rm-aggregate').innerHTML = `<div class="alert alert-warn">No course access.</div>`;
+        return;
+      }
+      document.getElementById('rm-aggregate').innerHTML = `<div class="center-load"><span class="spinner"></span><span>Loading…</span></div>`;
+      vm = await I.loadManager(ctx);
+      const it = vm.interactions.find(x => x.id === interactionId);
+      if (!it) { location.replace('dashboard.html'); return; }   // not in this course / not visible
+      showReport(interactionId, it.title, section);
+    }
+
+    // The Reports list: with no ?i=, every assignment of this course to open a report on. Who may see a report does
+    // not change: the list is whatever loadManager returns for this person, and the database filters that.
+    async function showPicker() {
+      const body = document.getElementById('report-body'), box = document.getElementById('report-picker');
+      body.style.display = 'none'; box.hidden = false;
+      document.getElementById('report-back').style.display = 'none';
+      const head = `<div class="page-head"><h1>Reports${infoHTML('Pick an assignment to see how the class did on it.', 'About this page')}</h1></div>`;
+      if (!ctx.currentOffering) { box.innerHTML = head + `<div class="alert alert-warn">No course access found.</div>`; return; }
+      box.innerHTML = head + `<div class="center-load"><span class="spinner"></span><span>Loading…</span></div>`;
+      try {
+        vm = await I.loadManager(ctx);
+      } catch (err) {
+        console.error('[report] the list could not be read:', err);
+        box.innerHTML = head + `<div class="alert alert-error">Could not load the list of assignments: ${esc(err?.message || String(err))}<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" id="picker-retry">Try again</button></div></div>`;
+        document.getElementById('picker-retry').onclick = () => showPicker();
+        return;
+      }
+      const rows = I.reportPickerRows(vm.interactions);
+      if (!rows.length) { box.innerHTML = head + `<div class="empty-state"><h3>No assignments to report on yet</h3><p>A report needs an assignment with questions or an interactive tutor.</p></div>`; return; }
+      box.innerHTML = head + `<div class="table-wrap"><table id="report-list"><thead><tr><th>Assignment</th><th>Due</th><th>Done</th><th></th></tr></thead><tbody>${rows.map(r => `<tr>
+        <td><strong>${esc(r.title)}</strong></td>
+        <td>${r.dueAt ? esc(new Date(r.dueAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })) : '<span class="muted">no date</span>'}</td>
+        <td>${r.total ? `${r.done} of ${r.total}` : '<span class="muted">-</span>'}</td>
+        <td style="white-space:nowrap">${r.published
+          ? `<a class="btn btn-primary btn-sm" href="report.html?i=${esc(encodeURIComponent(r.id))}">Open report</a>`
+          : `<span class="muted" title="Cadets cannot have done an unpublished assignment, so there is nothing to report yet.">Not published</span>`}</td></tr>`).join('')}</tbody></table></div>`;
+    }
+
+    // ── Lesson rollup viewer (v3 — matches the test-summary sandbox) ──────────────
+    // `section` (optional) preselects a single section. The rollup is rendered into the page body:
+    // tinted header (Oswald title + completion badge + flag pills + scope control), bordered effort +
+    // radar tiles, AI placeholders, per-objective rows, and a student-responses panel. Every numeric
+    // aggregate comes from summarizeReports — no AI.
+    const f1 = x => x == null ? '—' : (Number.isInteger(x) ? String(x) : x.toFixed(1));
+    // Scope values: 'mine' (the sections you teach — the DEFAULT for everyone), 'all' (the whole
+    // course), or a section uuid. 'mine' was added 2026-07-22 and made the default: opening a
+    // rollup on the whole course meant most readers' first view averaged over cohorts they do not
+    // teach, which is the wrong default for the people who use this page most.
+    let reportScope = 'mine';
+    let myScopeSectionIds = [];              // resolved per lesson in showReport()
+    // Director-only, off by default, deliberately NOT persisted: a director should land on their own
+    // sections every time rather than inherit a wider view they turned on weeks ago and forgot.
+    let showOtherSections = false;
+    const SEG_MAX = 5;                       // ≤ this many scope options → segmented control, else dropdown
+
+    function showReport(interactionId, title, section) {
+      reportInteraction = interactionId;
+      const it = vm.interactions.find(x => x.id === interactionId);
+      document.getElementById('rm-title').textContent = title || it?.title || 'Assignment report';
+
+      // Sections you personally teach, intersected with what this rollup actually loaded. A
+      // director holds an offering-wide staff row that grants sight of every section but is not a
+      // teaching assignment, so taughtSectionIds() excludes it — see its docstring. Empty means
+      // "staffs the offering but teaches no section of it", and 'mine' then falls back to 'all'
+      // rather than rendering an empty rollup.
+      const taught = new Set(I.taughtSectionIds(ctx));
+      myScopeSectionIds = vm.sections.filter(s => taught.has(String(s.id))).map(s => s.id);
+
+      reportScope = (section && vm.sections.some(s => s.id === section)) ? section : defaultScope();
+
+      reportRows = null; reportByStudent = {}; reportAnalysis = null;   // null → summary shows "computing…"
+      reportLoadError = null;
+      renderScope();
+      renderAggregate();
+
+      // Pull structured data for the whole roster once; the summary, flag lists, and responses
+      // panel all read it. RLS scopes which rows actually come back.
+      const allIds = vm.sections.flatMap(s => s.students.map(st => st.student_id));
+      I.loadInteractionData(ctx, interactionId, allIds).then(rows => {
+        if (reportInteraction !== interactionId) return;   // navigated to another lesson
+        reportRows = rows;
+        reportByStudent = Object.fromEntries(rows.map(r => [String(r.student_id), r]));
+        renderAggregate();
+      }).catch(err => {
+        // A REJECTION MUST BE VISIBLE. Without this the placeholder below is the only symptom:
+        // `reportRows` stays null, renderAggregate() takes its early return, and the panel reads
+        // "Computing course-wide summary…" for as long as anyone is willing to wait. That is
+        // exactly how a one-line ReferenceError in activitiesOf() (shipped 2026-07-27 with the
+        // per-day deadlines) looked like a hung computation rather than a crash — and why nobody
+        // could tell which of the day's changes had done it.
+        if (reportInteraction !== interactionId) return;
+        console.error('[report] loadInteractionData failed:', err);
+        reportLoadError = err?.message || String(err);
+        reportRows = [];                       // stop claiming to be computing
+        renderAggregate();
+      });
+      // Pull the cohort AI synthesis once (one row per scope). Loads independently of the numeric
+      // data — whichever resolves first renders; the AI panels degrade gracefully until this lands.
+      I.loadAnalysis(interactionId).then(res => {
+        if (reportInteraction !== interactionId) return;
+        reportAnalysis = res.scopes;
+        reportAliases = res.aliases;
+        reportGlossary = res.glossary;
+        renderAggregate();
+      }).catch(err => {
+        // Same contract. The AI panels already degrade to "not generated yet" when this is null,
+        // so the cost of a silent failure is lower here — but "the rollup was never run" and
+        // "the query for it broke" are different problems and must not look identical.
+        if (reportInteraction !== interactionId) return;
+        console.error('[report] loadAnalysis failed:', err);
+        renderAggregate();
+      });
+    }
+
+    /**
+     * The AI panels for the current scope.
+     *
+     * Two things are resolved separately, because since 2026-07-22 they live on different scopes:
+     *
+     *  - readiness_summary comes from the INSTRUCTOR scope ('instr:<uuid>'), written across all the
+     *    sections that instructor teaches with per-section departures listed under it. A single
+     *    section therefore shows its own numbers, its own quotes and its own recommendation, but
+     *    its instructor's summary — which is what makes two sections of the same lesson comparable
+     *    instead of each getting an isolated paragraph.
+     *  - everything else comes from the scope actually selected.
+     *
+     * 'mine' prefers the viewer's own instructor scope and falls back to '__all__' when they teach
+     * nothing. 'all' is always the whole-course row.
+     */
+    function myInstructorKey() { return ctx?.user?.id ? `instr:${ctx.user.id}` : null; }
+
+    function instructorScopeFor(sectionId) {
+      if (!reportAnalysis) return null;
+      // The instructor scope that claims this section. Falls back to the viewer's own scope, which
+      // is the common case: you are usually looking at a section you teach.
+      const owning = Object.entries(reportAnalysis).find(([k, v]) =>
+        k.startsWith('instr:') && Array.isArray(v.section_ids) && v.section_ids.map(String).includes(String(sectionId)));
+      if (owning) return owning[1];
+      const mine = myInstructorKey();
+      return (mine && reportAnalysis[mine]) || null;
+    }
+
+    function currentAnalysis() {
+      if (!reportAnalysis) return null;
+      const mineKey = myInstructorKey();
+      if (reportScope === 'mine') {
+        return (mineKey && reportAnalysis[mineKey]) || reportAnalysis.__all__ || null;
+      }
+      if (reportScope === 'all') return reportAnalysis.__all__ || null;
+
+      // A single section: its own panels, but the summary from whoever teaches it.
+      const own = reportAnalysis[reportScope] || null;
+      const instr = instructorScopeFor(reportScope);
+      if (!own && !instr) return null;
+      return {
+        ...(own || {}),
+        readiness_summary: instr?.readiness_summary ?? own?.readiness_summary ?? null,
+        section_notes: instr?.section_notes ?? null,
+        section_codes: instr?.section_codes ?? null,
+        instructor_name: instr?.instructor_name ?? null,
+        // Keep the section's own meta (n, fingerprint) — the summary is borrowed, the numbers are not.
+        meta: own?.meta ?? instr?.meta ?? null,
+      };
+    }
+
+    // Adaptive section scope: a segmented control when there are few options, a dropdown when many.
+    //
+    //   Course rollup — the whole course. FIRST in the list but never the default: a director
+    //                   wants insight into other sections, and should reach it deliberately rather
+    //                   than land on it. (Renamed from "All sections" 2026-07-22 — it is the
+    //                   course-level synthesis, not a union of the sections beside it, and the old
+    //                   label read as the latter.)
+    //   My sections   — the sections you teach, combined. Shown ONLY when you teach more than one;
+    //                   with exactly one it would duplicate that section's own tab.
+    //   <code>        — one section.
+    //
+    // Default: My sections when you teach several, your single section when you teach one, and the
+    // course rollup only when you teach none of it.
+    //
+    // SECTIONS YOU DO NOT TEACH ARE HIDDEN BEHIND THE LAMP, off by default, director-only.
+    // `vm.sections` is every section a director may SEE, which on a four-section course meant a
+    // director who teaches one of them opened this page to four tabs, three of them other people's
+    // cohorts. A director's day-to-day view of a lesson should look like an instructor's — their own
+    // sections — with the rest one deliberate click away rather than permanently in the way.
+    // Instructors never see the toggle because `vm.sections` already contains only their own.
+    function otherSectionIds() {
+      return vm.sections.map(s => s.id).filter(id => !myScopeSectionIds.includes(id));
+    }
+    function canSeeOthers() {
+      return !!ctx.isDirectorForCurrent?.() && otherSectionIds().length > 0;
+    }
+    function scopeOptions() {
+      const mineFirst = myScopeSectionIds.length > 1 ? ['mine'] : [];
+      const own = vm.sections.map(s => s.id).filter(id => myScopeSectionIds.includes(id));
+      // A director who teaches nothing here has no "own" sections; showing them an empty list would
+      // strand them, so they get everything and the toggle is pointless.
+      const base = own.length ? own : vm.sections.map(s => s.id);
+      const extra = (showOtherSections && own.length) ? otherSectionIds() : [];
+      return [...mineFirst, 'all', ...base, ...extra];
+    }
+
+    function defaultScope() {
+      if (myScopeSectionIds.length > 1) return 'mine';
+      if (myScopeSectionIds.length === 1) return myScopeSectionIds[0];
+      return 'all';
+    }
+
+    function renderScope() {
+      const host = document.getElementById('rm-scope');
+      const secs = vm.sections, opts = scopeOptions();
+      // A section id is a uuid in schema `app`; the CODE ('M1A') is what a human reads.
+      // The uuid stays the VALUE everywhere (scope keys, comparisons) — only labels change.
+      const codeOf = id => (vm.sections.find(s => s.id === id)?.code) || id;
+      const label = v => v === 'mine' ? 'My sections' : v === 'all' ? 'Course rollup' : codeOf(v);
+      const countOf = v => v === 'mine' ? myScopeSectionIds.length
+                         : v === 'all' ? secs.length
+                         : (secs.find(s => s.id === v)?.students.length ?? 0);
+
+      // Turning the toggle off while viewing a section it hides would strand the reader on a tab
+      // that is no longer in the list. Fall back to their own default rather than leave the control
+      // and the content disagreeing.
+      if (!opts.includes(reportScope)) reportScope = defaultScope();
+
+      // The other-sections toggle is a LAMP, and it sits inside the scope group rather than beside
+      // it. It used to be a text link reading "show all 4" / "hide others", which was two problems:
+      // the number said nothing about what changes (4 is the total, not the 3 being revealed), and
+      // parking a second, differently-styled control next to the tabs implied it selected a scope
+      // too. It never did — it changes which TABS exist. A lamp at the head of the group says
+      // "there is more behind this" without pretending to be one of the choices, and it is the
+      // leftmost thing in the group so the tabs that appear when it lights up grow to its right.
+      const others = otherSectionIds().length;
+      const lamp = canSeeOthers()
+        ? `<button type="button" class="scope-light" id="scope-more" aria-pressed="${showOtherSections}"
+                   aria-label="${showOtherSections ? 'Hide the ' + others + ' section(s) you do not teach'
+                                                   : 'Also show the ' + others + ' section(s) you do not teach'}"
+                   title="${showOtherSections ? `Showing all sections — click to hide the ${others} you do not teach`
+                                              : `Also show the ${others} section${others === 1 ? '' : 's'} you do not teach`}"
+           ><span class="lt" aria-hidden="true"></span></button>`
+        : '';
+
+      if (opts.length <= SEG_MAX) {
+        host.innerHTML = `<div class="seg" role="group" aria-label="Section">` + lamp
+          + opts.map(v => `<button data-scope="${esc(v)}" aria-pressed="${reportScope === v}">${esc(label(v))}</button>`).join('')
+          + `</div>`;
+        host.querySelector('.seg').addEventListener('click', e => {
+          // The lamp lives in this group but is not a scope — it has no data-scope, and letting
+          // the delegated handler see it would set reportScope to undefined.
+          const b = e.target.closest('button[data-scope]');
+          if (b) { reportScope = b.dataset.scope; renderScope(); renderAggregate(); }
+        });
+      } else {
+        host.innerHTML = (lamp ? `<div class="seg" role="group" aria-label="Section">${lamp}</div>` : '')
+          + `<select aria-label="Section">`
+          + opts.map(v => `<option value="${esc(v)}" ${reportScope === v ? 'selected' : ''}>`
+              + `${esc(label(v))}${v === 'mine' || v === 'all' ? ` (${countOf(v)} section${countOf(v) === 1 ? '' : 's'})` : ` (${countOf(v)})`}</option>`).join('')
+          + `</select>`;
+        host.querySelector('select').addEventListener('change', e => { reportScope = e.target.value; renderAggregate(); });
+      }
+      host.querySelector('#scope-more')?.addEventListener('click', () => {
+        showOtherSections = !showOtherSections;
+        renderScope(); renderAggregate();
+      });
+    }
+
+    // Roster for the chosen scope. `section` is tagged with the section CODE, not its id:
+    // it is only ever rendered (quote attribution, roster rows), never compared.
+    function rosterInScope() {
+      const src = reportScope === 'all' ? vm.sections
+                : reportScope === 'mine' ? vm.sections.filter(s => myScopeSectionIds.includes(s.id))
+                : vm.sections.filter(s => s.id === reportScope);
+      return src.flatMap(s => s.students.map(st => ({ ...st, section: s.code || s.id })));
+    }
+
+    // Does this scope cover exactly one section? Drives the quotes panel and the trend heading.
+    function singleSectionScope() {
+      return reportScope !== 'all' && reportScope !== 'mine' ? reportScope
+           : (reportScope === 'mine' && myScopeSectionIds.length === 1) ? myScopeSectionIds[0]
+           : null;
+    }
+
+    // Completion "Submitted" badge — submitted = a report row exists for the student (doneStudentIds).
+    function renderCompBadge(done, total) {
+      const full = total > 0 && done === total, p = total ? Math.round(done / total * 100) : 0;
+      document.getElementById('rm-comp').innerHTML =
+        `<span class="comp-block emph ${full ? 'comp-ok' : 'comp-warn'}" title="${p}% submitted">`
+        + `<span class="lab">Submitted</span><span class="num">${done}<span class="den">/${total}</span></span></span>`;
+    }
+
+    // Recompute completion + the rollup for the current scope. Called on open, on a scope change,
+    // and once the structured data finishes loading.
+    function renderAggregate() {
+      const el = document.getElementById('rm-aggregate');
+      if (!el) return;
+      const it = vm.interactions.find(x => x.id === reportInteraction);
+      const done = new Set(it?.doneStudentIds || []);
+      const roster = rosterInScope();
+      renderCompBadge(roster.filter(st => done.has(st.student_id)).length, roster.length);
+
+      if (reportLoadError) {
+        document.getElementById('rm-flagbar').innerHTML =
+          `<span class="muted" style="font-size:.82em">unavailable</span>`;
+        el.innerHTML = `<div class="alert alert-error">
+          <strong>The rollup data could not be loaded.</strong>
+          Nothing is wrong with this lesson's submissions — the query for them failed, so there is
+          nothing to summarize. Tell your course director, with this message:
+          <div class="muted" style="margin-top:6px;font-family:var(--mono,monospace);font-size:.9em">${esc(reportLoadError)}</div>
+        </div>`;
+        return;
+      }
+      if (reportRows === null) {
+        document.getElementById('rm-flagbar').innerHTML = `<span class="muted" style="font-size:.82em">Computing…</span>`;
+        el.innerHTML = `<div class="summary-placeholder">Computing course-wide summary…</div>`;
+        return;
+      }
+      const ids = new Set(roster.map(st => String(st.student_id)));
+      const rows = reportRows.filter(r => ids.has(String(r.student_id)));
+      const s = I.summarizeReports(rows, undefined,
+        { aliases: reportAliases, glossary: reportGlossary });
+      // A, B, C… in list order — free response first when present, then weakest first
+      // (summarizeReports owns that order; see its objectives block).
+      s.objectives.forEach((o, i) => o.letter = String.fromCharCode(65 + i));
+      el.innerHTML = aggregateHTML(s, rows, roster, currentAnalysis());
+      renderFlagBar(s);
+      wireRollup();
+    }
+
+    // ── Rollup visual primitives (pure HTML builders; colors from CSS ramp tokens) ──
+    const RAMP5 = ['--s1', '--s2', '--s3', '--s4', '--s5'];
+    const zoneVar = v => `var(${RAMP5[Math.max(0, Math.min(4, Math.ceil(v) - 1))]})`;
+    // Effort histogram colors follow the 6-step distribution ramp (DESIGN.md: --d0…--d5 for 0–5
+    // histograms) — the single, shared effort-chart style (matches the dashboard spotlight).
+    const EFFORT_COL = ['var(--d0)', 'var(--d1)', 'var(--d2)', 'var(--d3)', 'var(--d4)', 'var(--d5)'];
+
+    // Reading time — Q1 of every preflight ("how long did you spend reading?"), 0 points and
+    // anonymous to instructors. Horizontal bars, not the 0–5 vertical treatment: the buckets are
+    // uneven minute ranges with text labels, and reading them side-by-side against the effort
+    // chart would falsely suggest a shared scale. Median rather than mean — one three-hour
+    // reader would drag a mean somewhere no student actually sits.
+    function readingChart(r) {
+      if (!r || !r.assessed) {
+        return `<div class="empty-note">No reading times recorded${
+          r && r.notStated ? ` — ${r.notStated} answered Q1 without naming a duration` : ''}.</div>`;
+      }
+      const max = Math.max(1, ...r.buckets.map(b => b.count));
+      const rows = r.buckets.map(b => `<div class="rt-row">
+          <span class="rt-lab">${esc(b.label)}</span>
+          <span class="rt-track"><span class="rt-fill" style="width:${b.count / max * 100}%"></span></span>
+          <span class="rt-n">${b.count}</span>
+        </div>`).join('');
+      const spread = (r.min != null && r.max != null && r.min !== r.max)
+        ? ` <span class="dim">· ${r.min}–${r.max} min range</span>` : '';
+      return `<div class="rt-wrap">
+        <div class="rt-median">median <b>${r.median} min</b>${spread}</div>
+        ${rows}
+        ${r.notStated ? `<div class="rt-note">${r.notStated} gave no duration</div>` : ''}
+      </div>`;
+    }
+
+    // Effort distribution — vertical 0–5 bars with the submission count above each bar.
+    function effortChart(eff) {
+      const counts = eff.hist, max = Math.max(...counts, 1);
+      const cols = counts.map((c, i) =>
+        `<div class="eff-col" title="Effort ${i}: ${c}"><span class="eff-cnt">${c}</span>` +
+        `<div class="eff-bar" style="height:${c / max * 100}%;background:${EFFORT_COL[i]}"></div></div>`).join('');
+      return `<div class="eff-wrap"><div class="eff-bars">${cols}</div>
+        <div class="eff-x">${counts.map((_, i) => `<span>${i}</span>`).join('')}</div></div>`;
+    }
+
+    // Why the radar could not be drawn. The summary decides this (summarizeReports → s.radar) so
+    // the reason is computed once next to the data; this only phrases it.
+    //
+    // The written-only case is the one worth spelling out. A question set yields exactly ONE
+    // understanding measure — the free-response question — and a radar needs three axes to
+    // enclose an area. So the chart is not missing because nobody worked the lesson; it is
+    // structurally unavailable for this cohort, and the understanding IS reported, just in the
+    // breakdown below. A bare empty panel here reads as a broken chart and gets reported as a bug.
+    function radarUnavailable(radar, paths) {
+      const body = {
+        'no-data': `No submissions in this scope yet.`,
+        'written-only': `Not available for this assignment — everyone worked the question set, which
+          measures understanding on one free-response question rather than per objective. That
+          score is in <b>Understanding by objective</b> below, as <b>Free response</b>.`,
+        'too-few-objectives': `Needs at least 3 assessed objectives — this scope has
+          ${radar.axisCount}. The per-objective scores are below.`,
+      }[radar.reason] || `Radar unavailable for this scope.`;
+      const hint = radar.reason === 'written-only' && paths?.interactiveN === 0
+        ? `<div class="radar-na-hint">Axes appear once students take the interactive path.</div>` : '';
+      return `<div class="radar-na"><div class="radar-na-ic" aria-hidden="true">◌</div>
+        <div class="radar-na-txt">${body}</div>${hint}</div>`;
+    }
+
+    // Radar of understanding across objectives — single-letter axis labels (A,B,C…). Needs ≥3.
+    // Each hit circle carries the objective label + mean for the hover tooltip.
+    //
+    // On a mixed cohort the written path contributes one extra axis, "Free response", alongside
+    // the interactive objectives: it is the same 0–5 understanding measure, so it plots on the
+    // same scale and is directly comparable. It arrives already FIRST in `objectives`
+    // (summarizeReports unshifts it), so it is always axis A — at the top of the polygon, in the
+    // same place on every lesson — and nothing here has to special-case it.
+    function radarSVG(objectives, radar, paths) {
+      const objs = objectives.filter(o => o.understanding != null).map(o => ({ letter: o.letter, m: o.understanding, label: o.label }));
+      if (objs.length < 3) return radarUnavailable(radar || { reason: 'too-few-objectives', axisCount: objs.length }, paths);
+      const N = objs.length, cx = 150, cy = 150, R = 96, LBL = 5.42;   // LBL = label-ring radius (just outside the grid)
+      const ang = i => (-Math.PI / 2) + (i * 2 * Math.PI / N);
+      const pt = (i, rv) => [cx + Math.cos(ang(i)) * R * (rv / 5), cy + Math.sin(ang(i)) * R * (rv / 5)];
+      let grid = '';
+      for (let lvl = 1; lvl <= 5; lvl++)
+        grid += `<polygon points="${objs.map((_, i) => pt(i, lvl).join(',')).join(' ')}" fill="none" stroke="var(--track-edge)" stroke-width="1" opacity="${lvl === 5 ? 0.9 : 0.4}"/>`;
+      let axes = '', labels = '', hits = '';
+      objs.forEach((o, i) => {
+        const [x, y] = pt(i, 5); axes += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="var(--track-edge)" stroke-width="1"/>`;
+        const [lx, ly] = pt(i, LBL);
+        labels += `<text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="central" font-size="13" font-weight="800" fill="var(--text)">${o.letter}</text>`;
+        hits += `<circle class="radar-hit" cx="${lx}" cy="${ly}" r="18" data-l="${esc(o.label)}" data-m="${f1(o.m)}"/>`;
+      });
+      const avg = objs.reduce((s, o) => s + o.m, 0) / objs.length, col = zoneVar(avg);
+      // Fit the viewBox to the actual label ring so any objective count renders without clipping.
+      // The old fixed box (0 30 300 190) was tuned for a 3-point triangle and cropped the bottom/
+      // side labels once the polygon filled out at N≥4. M leaves room for the label glyph.
+      const lpts = objs.map((_, i) => pt(i, LBL)), xs = lpts.map(p => p[0]), ys = lpts.map(p => p[1]), M = 14;
+      const x0 = Math.min(...xs) - M, y0 = Math.min(...ys) - M;
+      const vw = Math.max(...xs) + M - x0, vh = Math.max(...ys) + M - y0;
+      return `<svg width="${vw.toFixed(1)}" height="${vh.toFixed(1)}" viewBox="${x0.toFixed(1)} ${y0.toFixed(1)} ${vw.toFixed(1)} ${vh.toFixed(1)}" role="img" aria-label="Understanding by objective">${grid}${axes}
+        <polygon points="${objs.map((_, i) => pt(i, 3.5).join(',')).join(' ')}" fill="none" stroke="var(--blue-lt)" stroke-width="1.5" stroke-dasharray="4 4" opacity="0.85"/>
+        <polygon points="${objs.map((o, i) => pt(i, o.m).join(',')).join(' ')}" fill="color-mix(in srgb, ${col} 26%, transparent)" stroke="${col}" stroke-width="2.5"/>
+        ${objs.map((o, i) => { const [x, y] = pt(i, o.m); return `<circle cx="${x}" cy="${y}" r="3.5" fill="${col}"/>`; }).join('')}${labels}${hits}</svg>`;
+    }
+
+    /* ── Understanding by objective: two renderings, one preference ──────────────────
+     * P1.5. The curve (lrFine5, below) is a kernel-density estimate — it is prettier, and it is
+     * a model. The histogram is the counts.
+     *
+     * The default is now the HISTOGRAM, for one reason that outweighs the curve's looks: the
+     * effort chart directly above it is an integer 0–5 histogram, and two charts of the same
+     * 0–5 measure drawn in two different visual languages invite exactly the wrong comparison.
+     * A reader who sees a smooth hump beside a bar chart reasonably assumes they are different
+     * KINDS of quantity. They are not — both are counts of students at each score.
+     *
+     * The curve is kept, not deleted, and reachable from Account > Preferences. It genuinely
+     * reads better for a large cohort where the integer bars get spiky, and a director who
+     * prefers it should not have to argue for it.
+     */
+    const UNDERSTANDING_PREF = 'cp.rollup.understanding';
+
+    // Integer histogram for a 0–5 distribution — deliberately the same markup, ramp and metrics
+    // as effortChart(), because "matches the effort histogram" is the requirement, not a
+    // coincidence. Anything that changes there should change here.
+    function objIntChart(counts) {
+      const max = Math.max(...counts, 1);
+      const cols = counts.map((c, i) =>
+        `<div class="eff-col" title="Understanding ${i}: ${c}"><span class="eff-cnt">${c}</span>` +
+        `<div class="eff-bar" style="height:${c / max * 100}%;background:${EFFORT_COL[i]}"></div></div>`).join('');
+      return `<div class="eff-wrap obj-hist"><div class="eff-bars">${cols}</div>
+        <div class="eff-x">${counts.map((_, i) => `<span>${i}</span>`).join('')}</div></div>`;
+    }
+
+    /** Render one objective's distribution in whichever style this person prefers. */
+    function objChart(counts) {
+      return getPref(UNDERSTANDING_PREF) === 'curve' ? lrFine5(counts) : objIntChart(counts);
+    }
+
+    // Fine-cell histogram for a 0–5 distribution: 5 column-groups × 5 cells trace a smooth curve;
+    // integer scores land on the group boundaries, so the axis is ticked 0–5 at the gaps.
+    //
+    // The raw data is a 6-bin integer histogram (counts of scores 0–5). Instead of linearly
+    // interpolating between bins — which smears a lone score into a lopsided triangle spanning ±1 —
+    // we render an *adaptive* kernel-density estimate. Each occupied bin contributes one unit-area
+    // Gaussian per student, centered on its score, whose bandwidth follows Abramson's square-root
+    // law: h ∝ 1/√(local count). Sparse bins (1–2 students) → wide, soft, symmetric bump (honest
+    // uncertainty); well-populated bins → narrow, tall, confident peak. Equal area per student, so
+    // a lone point is short-and-broad while a crowded bin is tall-and-sharp. Tune H0/HMIN/HMAX (in
+    // score units) to taste — they only affect the visual smoothness, not the underlying numbers.
+    function lrFine5(counts) {
+      const COLS = 5, CELLS = 5, GAP = 9;                  // GAP must match .lr-fine gap in CSS
+      const { H0, HMIN, HMAX } = KDE;                       // live-tunable via the KDE tuner panel (TEMP)
+      const SQRT2PI = Math.sqrt(2 * Math.PI);
+      // Per-bin bandwidth: wide where data is thin, narrow where it's dense (clamped both ways).
+      const band = i => Math.max(HMIN, Math.min(HMAX, H0 / Math.sqrt(counts[i])));
+      // KDE at score x: sum of unit-area Gaussians, one weighted block per occupied bin.
+      const dens = x => {
+        let s = 0;
+        for (let i = 0; i <= 5; i++) {
+          if (!counts[i]) continue;
+          const h = band(i), z = (x - i) / h;
+          s += counts[i] * Math.exp(-0.5 * z * z) / (h * SQRT2PI);
+        }
+        return s;
+      };
+      // Sample the density at every cell center first, then scale to the tallest cell.
+      const cells = [];
+      for (let c = 0; c < COLS; c++)
+        for (let k = 0; k < CELLS; k++) cells.push(dens(c + (k + 0.5) / CELLS));
+      const max = Math.max(...cells, 1e-9);
+      let groups = '', idx = 0;
+      for (let c = 0; c < COLS; c++) {
+        let bars = '';
+        for (let k = 0; k < CELLS; k++)
+          bars += `<div class="lr-fbar" style="height:${cells[idx++] / max * 100}%;background:var(${RAMP5[c]})"></div>`;
+        groups += `<div class="lr-fgroup">${bars}</div>`;
+      }
+      const ticks = [0, 1, 2, 3, 4, 5].map(sv => {
+        if (sv === 0)    return `<span style="left:0">0</span>`;
+        if (sv === COLS) return `<span style="right:0">${COLS}</span>`;
+        const off = GAP * (sv / COLS - 0.5);
+        return `<span style="left:calc(${sv / COLS * 100}% ${off < 0 ? '-' : '+'} ${Math.abs(off).toFixed(2)}px);transform:translateX(-50%)">${sv}</span>`;
+      }).join('');
+      return `<div><div class="lr-fine">${groups}</div><div class="lr-fx">${ticks}</div></div>`;
+    }
+
+    // Director-only floating KDE tuner. Sliders mutate the live KDE knobs and re-render the rollup
+    // so the objective histograms update instantly; "Copy" grabs the const line to paste into the
+    // KDE object above. Self-contained — delete this function, its call site, and the KDE object to
+    // remove the feature entirely.
+    //
+    // REACHED BY ?kde=1 ONLY, and still director-gated on top of that (see the call site). If you
+    // are looking for it because the histograms need retuning, open the rollup as
+    // report.html?i=<slug>&kde=1.
+    function mountKdeTuner() {
+      const knobs = [
+        ['H0',   0.05, 1.50, 0.01, 'lone-point width'],
+        ['HMIN', 0.05, 0.60, 0.01, 'crowded-bin floor'],
+        ['HMAX', 0.20, 2.00, 0.01, 'sparse-bin ceiling'],
+      ];
+      const line = () => `const H0 = ${KDE.H0.toFixed(2)}, HMIN = ${KDE.HMIN.toFixed(2)}, HMAX = ${KDE.HMAX.toFixed(2)};`;
+      const box = document.createElement('div');
+      box.id = 'kde-tuner';
+      box.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:9999;width:236px;'
+        + 'background:var(--surface,#fff);color:var(--text,#111);border:1px solid var(--border,#ccc);'
+        + 'border-radius:10px;padding:12px 14px;box-shadow:0 8px 28px rgba(0,0,0,.28);'
+        + 'font:12px/1.4 system-ui,sans-serif';
+      box.innerHTML =
+        `<div style="font-weight:700;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">`
+        + `<span>Histogram smoothing <span style="font-weight:400;opacity:.6">· KDE</span></span>`
+        + `<button id="kde-x" title="Hide" style="border:none;background:none;cursor:pointer;font-size:15px;color:inherit;line-height:1">×</button></div>`
+        + knobs.map(([k, mn, mx, st, hint]) =>
+            `<label style="display:block;margin:8px 0">`
+            + `<span style="display:flex;justify-content:space-between"><b>${k}</b><code id="kde-${k}-v">${KDE[k].toFixed(2)}</code></span>`
+            + `<input type="range" id="kde-${k}" min="${mn}" max="${mx}" step="${st}" value="${KDE[k]}" style="width:100%;accent-color:var(--blue,#2563eb)">`
+            + `<span style="opacity:.55;font-size:11px">${hint}</span></label>`).join('')
+        + `<button id="kde-copy" style="width:100%;margin-top:6px;padding:6px;border:none;border-radius:6px;`
+        + `background:var(--blue,#2563eb);color:#fff;cursor:pointer;font-weight:600">Copy const line</button>`
+        + `<code id="kde-out" style="display:block;margin-top:7px;font-size:11px;word-break:break-all;opacity:.75"></code>`;
+      document.body.appendChild(box);
+      const out = box.querySelector('#kde-out'); out.textContent = line();
+      knobs.forEach(([k]) => {
+        const inp = box.querySelector('#kde-' + k), val = box.querySelector(`#kde-${k}-v`);
+        inp.addEventListener('input', () => {
+          KDE[k] = parseFloat(inp.value); val.textContent = KDE[k].toFixed(2);
+          out.textContent = line();
+          renderAggregate();   // re-draw the rollup (and its objective histograms) with the new knobs
+        });
+      });
+      box.querySelector('#kde-copy').addEventListener('click', async (e) => {
+        try { await navigator.clipboard.writeText(line()); } catch (_) { }
+        const b = e.currentTarget, t = b.textContent; b.textContent = 'Copied ✓';
+        setTimeout(() => { b.textContent = t; }, 1200);
+      });
+      box.querySelector('#kde-x').addEventListener('click', () => box.remove());
+    }
+
+    // AI aggregator placeholder — the AI trend passes (effort summary, misconception clustering)
+    // aren't built yet, and the contract carries no place to store their output. Shows skeletons.
+    function aiPlaceholder(msg) {
+      return `<div class="ai-box">
+        <p class="ai-tbd">${esc(msg || 'Effort and engagement trends, reflection quality, and notable outliers will be summarized here once the analysis aggregator is built.')}</p>
+        <div class="sk"></div><div class="sk" style="width:88%"></div><div class="sk" style="width:70%"></div>
+      </div>`;
+    }
+
+    // Real AI prose (readiness summary / misconception trends), written by /lesson-aggregate.
+    // The text is AI-produced and stored as an inert blob, so sanitize at render time like the
+    // full-report Markdown does.
+    function aiProse(md) {
+      return `<div class="md-render ai-prose">${DOMPurify.sanitize(marked.parse(String(md || '')))}</div>`;
+    }
+    // Eyebrow note for a wired AI panel: when it was generated, plus a quiet staleness hint if the
+    // scope's report count has changed since (meta.n is the count the synthesis was built from).
+    function aiGenNote(analysis, scopeN) {
+      let when = '';
+      try { when = ' ' + new Date(analysis.generated_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch (e) { }
+      const stale = Number.isInteger(analysis?.meta?.n) && Number.isInteger(scopeN) && analysis.meta.n !== scopeN;
+      return `· AI generated${when}${stale ? ' · may be out of date' : ''}`;
+    }
+
+    // Misconception prevalence — real bars from report_data: the share of submitted students who
+    // showed each misconception (most common first). Color intensifies with prevalence; the "major"
+    // count is noted.
+    //
+    // Each bar now EXPLAINS ITSELF. A label like "Scalar sum of forces" at 57% told a reader
+    // nothing about what the students actually got wrong, and the description and evidence that
+    // would have said so were collected by both producers, handed to the aggregator, and then
+    // dropped before they ever reached this function. They survive now, and surface as a popover on
+    // hover and on click/focus.
+    //
+    // Hover alone would be unreachable by keyboard and unusable on a tablet, so the row is a real
+    // <button> with aria-expanded: hover reveals it, click pins it, Escape closes. Nothing here is
+    // load-bearing for the numbers — a misconception with no description still renders its bar.
+    function mcBars(misconceptions, n) {
+      if (!misconceptions.length) return `<div class="muted" style="font-size:.85em">No misconceptions recorded in this scope.</div>`;
+      return misconceptions.slice(0, 8).map((m, i) => {
+        const p = n ? Math.round(m.count / n * 100) : 0;
+        const col = p >= 50 ? 'var(--red)' : p >= 25 ? 'var(--gold)' : 'var(--blue-lt)';
+        const major = m.major ? ` · ${m.major} major` : '';
+        const hasDetail = !!(m.description || (m.examples && m.examples.length));
+        const examples = (m.examples || []).map(x =>
+          `<li class="mc-ex">“${esc(x)}”</li>`).join('');
+        // Variants are shown only when the alias fold actually merged something, so a director can
+        // see that two coined ids were treated as one rather than wondering where a bar went.
+        const variants = (m.variants || []).length
+          ? `<div class="mc-pop-variants">Also recorded as ${m.variants.map(v => `<code>${esc(v)}</code>`).join(', ')}</div>` : '';
+        const pop = hasDetail ? `<div class="mc-pop" role="tooltip" id="mcpop-${i}">
+            <div class="mc-pop-title">${esc(m.label)}</div>
+            ${m.description ? `<p class="mc-pop-desc">${esc(m.description)}</p>` : ''}
+            ${examples ? `<div class="mc-pop-lab">What students wrote</div><ul class="mc-pop-ex">${examples}</ul>` : ''}
+            ${variants}
+            <div class="mc-pop-id"><code>${esc(m.id)}</code></div>
+          </div>` : '';
+        return `<div class="progress-row mc-row${hasDetail ? ' has-pop' : ''}" style="margin-bottom:10px">
+          ${hasDetail
+            ? `<button type="button" class="pr-label mc-label" aria-expanded="false" aria-describedby="mcpop-${i}">${esc(m.label)}<span class="mc-info" aria-hidden="true">?</span></button>`
+            : `<span class="pr-label">${esc(m.label)}</span>`}
+          <span class="pr-count">${m.count}/${n} · ${p}%${major}</span>
+          <div class="pr-track"><div class="pr-fill" style="width:${Math.max(p, 3)}%;background:${col}"></div></div>
+          ${pop}
+        </div>`;
+      }).join('');
+    }
+
+    /* ── Student response panels (single-section scope only) ─────────────────────
+     * TWO panels since 2026-07-30 (director's request), built from one implementation:
+     *
+     *   Student Reading Reflections — what the cohort said about the reading (Q2). Carries the
+     *     aggregator's AI-picked showcase quotes, because reflections are what /lesson-aggregate
+     *     selects from (SKILL.md "selected_quotes").
+     *   Student Free Responses      — their answers to the lesson's own physics question (Q3).
+     *     NO AI PICKS, and that is a deliberate limit rather than an oversight: the lesson cycle
+     *     is untouched by this change, so nothing has ever argued for a free-response quote. Every
+     *     card here is a random sample, and the panel says so.
+     *
+     * It was ONE panel called "Student responses" until then, showing reflections only — which is
+     * the part that misled. The heading claimed everything a student wrote and delivered one
+     * question's worth, so an instructor looking for what the class said about the actual physics
+     * found a panel that appeared to be it and was not.
+     *
+     * Both are single-section tools (`singleScope`): AI picks are per-section and an instructor's
+     * union must never surface a cross-section quote. The rule is inherited unchanged by the
+     * second panel — not because IT has AI picks, but because a quote panel is for reading out in
+     * one classroom, and the free responses of a cohort you do not teach are not that.
+     */
+    let respStates = {};   // prefix -> { ai, pool, sample, randN, namesOn, showAll }
+
+    /** Roster lookup shared by both builders: student id -> { name, section }. */
+    const whoOf = roster => Object.fromEntries(roster.map(st => [String(st.student_id), st]));
+
+    function buildResponses(rows, roster, analysis) {
+      const who = whoOf(roster);
+      const byId = Object.fromEntries(rows.map(r => [String(r.student_id), r]));
+      // TWO SOURCES, IN THIS ORDER, and the second is what lets this panel fill before grading.
+      // `report_data.reading_reflection.text` exists only once /preflight-analyze has written a
+      // schema:1 assessment. `row.reflection_response` is the raw submitted answer and exists the
+      // moment the student submits. Reading only the first left this panel absent until grading
+      // ran, while the Free Responses panel below it — reading its answer off the submission —
+      // was already full for the same cohort. Both now fill on submission; what grading adds is
+      // the AI's reading of the reflection and the showcase picks, not the reflection itself.
+      //
+      // A reflection the AI judged `meaningful === false` is kept OUT of the AI picks and the
+      // random sample, and kept IN the listing: it goes to `hidden`, which "Show all" lists last
+      // with a tag. Until 2026-11-02 it was dropped entirely, so "Show all 15" sat under
+      // "Submitted 18/18" with nothing saying where the other three were (a T3A instructor's
+      // report, PHYS 215 Lesson 28). The sample is still what you read aloud in class; the full
+      // listing is where you check that everyone is there.
+      //
+      // `low` uses the SAME test as the ✎ "Reflection capped" pill (FLAGS, below): not meaningful
+      // AND effort still at or under 2. An instructor who publishes full credit lifts effort to 3
+      // (confirmEffortRows, faculty-grade.js), which overrules the AI's judgment — so the card
+      // rejoins the sample and loses its tag, exactly as the pill clears.
+      const reflOf = id => {
+        const row = byId[id];
+        if (!row) return null;
+        const d = (row.report_data && typeof row.report_data === 'object') ? row.report_data : null;
+        const rr = (d && d.reading_reflection && typeof d.reading_reflection === 'object') ? d.reading_reflection : null;
+        const text = (rr && rr.text) ? String(rr.text)
+                   : (typeof row.reflection_response === 'string' ? row.reflection_response : '');
+        const low = !!rr && rr.meaningful === false && !(Number.isInteger(d?.effort) && d.effort > 2);
+        return text.trim() ? { text: text.trim(), low } : null;
+      };
+
+      // AI-picked showcase quotes — the aggregator stores only {student_id, section_id}; resolve the
+      // verbatim text + name live from the already-loaded report_data + roster (never duplicated).
+      const ai = (analysis && Array.isArray(analysis.selected_quotes) ? analysis.selected_quotes : [])
+        .map(q => { const id = String(q?.student_id); const r = reflOf(id), w = who[id]; return (r && !r.low && w) ? { id, text: r.text, name: w.name || '—', section: w.section || '' } : null; })
+        .filter(Boolean);
+
+      // Random pool = every meaningful reflection in scope, minus the ones already shown as AI picks.
+      // `hidden` = the ones the AI judged not meaningful, for the full listing only.
+      const aiIds = new Set(ai.map(q => q.id));
+      const pool = [], hidden = [];
+      rows.forEach(r => {
+        const id = String(r.student_id);
+        if (aiIds.has(id)) return;
+        const refl = reflOf(id); if (!refl) return;
+        const w = who[id] || {};
+        (refl.low ? hidden : pool).push({ id, text: refl.text, name: w.name || '—', section: w.section || '' });
+      });
+      return { ai, pool, hidden };
+    }
+
+    /**
+     * The same shape for free responses, and `ai` is empty BY CONSTRUCTION rather than by
+     * happening to find none. `analysis.selected_quotes` resolves through the reflection text and
+     * always will until the aggregator learns to pick from a second field; pretending otherwise
+     * here would mean silently attributing "AI pick" to a card the AI never argued for.
+     *
+     * `row.free_response` is the verbatim answer, lifted onto the row by loadInteractionData().
+     * A pure interactive taker has null there, so they simply do not appear — which is also why
+     * an empty pool is the honest signal that this assignment has no free-response half.
+     *
+     * `noWritten` counts those interactive takers so the panel can SAY why its count is short of
+     * "Submitted". On a mixed lesson the gap otherwise reads as missing answers (2026-11-02).
+     */
+    function buildFreeResponses(rows, roster) {
+      const who = whoOf(roster);
+      const pool = [];
+      let noWritten = 0;
+      rows.forEach(r => {
+        if (r.path === 'interactive') { noWritten++; return; }
+        const text = typeof r.free_response === 'string' ? r.free_response.trim() : '';
+        if (!text) return;
+        const id = String(r.student_id);
+        const w = who[id] || {};
+        pool.push({ id, text, name: w.name || '—', section: w.section || '' });
+      });
+      return { ai: [], pool, hidden: [], noWritten };
+    }
+    function sampleN(arr, n) {
+      const p = arr.slice(), out = [];
+      while (out.length < n && p.length) out.push(p.splice(Math.floor(Math.random() * p.length), 1)[0]);
+      return out;
+    }
+    // A hidden name is NOT an absent name — so when names are off, the name is not rendered at all.
+    //
+    // The legacy Report tab kept attribution in the DOM at display:none and the audit flagged it
+    // explicitly: "If this is rebuilt, do not render names that are not meant to be shown"
+    // (LEGACY-AUDIT-2026-07-20.md §2.1). This panel had inherited the same shape — `data-name` plus
+    // a `hidden` .att div — which matters because its whole purpose is being projected in a
+    // classroom: devtools, Ctrl+F, select-all and a screen reader all defeat `hidden`.
+    //
+    // Toggling names now re-renders (drawResponses) rather than unhiding, so the name only ever
+    // enters the document when the instructor has actually asked for it.
+    // `isLow` marks a reflection the AI judged not meaningful. It only ever appears in "Show all".
+    function srCard(q, isAI, namesOn, isLow = false) {
+      const attr = namesOn
+        ? ` data-name="${esc(q.name)}" data-sec="${esc(q.section)}"`
+        : ` data-sec="${esc(q.section)}"`;
+      const badge = isAI ? '<span class="sr-badge">AI pick</span>'
+                  : isLow ? '<span class="sr-badge low">AI: not meaningful</span>' : '';
+      return `<div class="sr-quote${isAI ? ' ai' : ''}${isLow ? ' low' : ''}" data-text="${esc(q.text)}"${attr}>
+        <span class="ck" aria-hidden="true"></span>
+        <div class="body">${badge}
+          <div class="qt">${esc(q.text)}</div>
+          ${namesOn ? `<div class="att">— ${esc(q.name)} · ${esc(q.section)}</div>` : ''}
+        </div>
+      </div>`;
+    }
+    /**
+     * The prompt the responses below are answers TO — rendered above the free-response panel only.
+     *
+     * WHY ONLY THERE. The reading reflection asks the identical fixed question every lesson of the
+     * term ("what did you find confusing or most interesting"), so printing it above its own panel
+     * would be forty repetitions of a sentence the reader has memorised. The free-response
+     * question is the lesson's actual physics and is different every time — an instructor reading
+     * eighteen answers three days later genuinely cannot recall which one they were to. It is
+     * there to jog a memory, not to be studied, which is why the figure is capped rather than
+     * shown at its authored size (director, 2026-07-30).
+     */
+    function promptBlock(q) {
+      if (!q || !String(q.text || '').trim()) return '';
+      const fig = q.figure_url
+        ? `<img class="sr-prompt-fig" src="${esc(q.figure_url)}" alt="Figure accompanying the free-response question" loading="lazy">`
+        : '';
+      return `<div class="sr-prompt">
+        <div class="sr-prompt-q">${esc(String(q.text).trim())}</div>${fig}
+      </div>`;
+    }
+
+    /**
+     * One quote panel. Per-section teaching tool: rendered only on a single-section scope
+     * (`singleScope`), because AI picks are per-section and an instructor's union must never
+     * surface a cross-section quote. ("My sections" counts as single-section when you teach
+     * exactly one — see singleSectionScope.)
+     *
+     * Parameterized by `p`, a two-letter DOM prefix, so the two panels are the same code rather
+     * than the same code twice. Every id below is `${p}-…`; the CSS classes are shared, and the
+     * click handlers scope themselves to `#${p}-list`.
+     */
+    function responsePanel(p, { title, ai, pool, hidden = [], noWritten = 0, note, prompt = '' }) {
+      // Absent, not empty. A panel with no cards says "we have nothing from this cohort", which on
+      // the free-response side is indistinguishable from "this assignment had no written half".
+      if (!ai.length && !pool.length && !hidden.length) { delete respStates[p]; return ''; }
+      // 3 AI picks + 5 ADDITIONAL random — the random count is fixed, not a remainder.
+      //
+      // This previously read `Math.max(0, 5 - ai.length)`, capping the panel at ~5 cards total, so
+      // every AI pick displaced a random one. That inverted the intent: the AI picks are the
+      // aggregator's argued-for showcase quotes, and the random sample exists to show what the rest
+      // of the section actually wrote. Letting the first shrink the second meant a well-analysed
+      // section showed the least unfiltered student writing. The aggregator emits exactly 3 picks
+      // (lesson-aggregate SKILL.md), so the panel is 8 cards where the pool allows.
+      const RANDOM_N = 5;
+      const randN = Math.min(RANDOM_N, pool.length);
+      // `showAll` switches the random sample for the ENTIRE pool, AI picks still pinned on top.
+      // The sampled view is the teaching default (8 cards fit on a screen and in a class); reading
+      // every response is a different task — grading, or looking for someone specific — and used
+      // to require opening each student individually.
+      // `hidden` never enters the sample — only the full listing, after the pool.
+      respStates[p] = { ai, pool, hidden, noWritten, randN, sample: sampleN(pool, randN), namesOn: false, showAll: false };
+      const total = ai.length + pool.length + hidden.length;
+      return `<div class="lr-sec fw-panel" id="${p}-sec">
+        <div class="lr-eyebrow">${esc(title)} <span class="dim" id="${p}-note">· ${esc(note(respStates[p]))}</span></div>
+        ${prompt}
+        <div class="sr-controls">
+          <button class="switch" id="${p}-names" type="button" aria-pressed="false"><span class="track"><span class="knob"></span></span>Show names</button>
+          <span class="spacer"></span>
+          ${pool.length + hidden.length > randN ? `<button class="tbtn" id="${p}-all" type="button" aria-pressed="false">Show all ${total}</button>` : ''}
+          ${randN > 0 && pool.length > randN ? `<button class="tbtn" id="${p}-shuffle" type="button">↻ Shuffle random</button>` : ''}
+          ${total > 1 ? `<button class="tbtn" id="${p}-sel" type="button" aria-pressed="false">Select all shown</button>` : ''}
+          <button class="tbtn" id="${p}-copy" type="button">Copy selected</button>
+        </div>
+        <div class="sr-quotes" id="${p}-list"></div>
+      </div>`;
+    }
+
+    /** The sub-heading each panel carries. Different sentences, because they are different claims. */
+    //
+    // Each panel also says why its count can be short of "Submitted" — the gap is what an
+    // instructor reads as missing work (2026-11-02). Reflections: the ones the AI judged not
+    // meaningful sit in "Show all" only. Free responses: interactive takers had no such question.
+    const lowClause = (st) => st.hidden.length
+      ? ` · ${st.hidden.length} judged not meaningful${st.showAll ? ', listed last' : ' (in Show all)'}` : '';
+    const reflectionNote = (st) => st.showAll
+      ? `${st.ai.length} AI pick${st.ai.length === 1 ? '' : 's'} + all ${st.pool.length + st.hidden.length} reflections${lowClause(st)} · select to copy for slides`
+      : `${st.ai.length ? `${st.ai.length} AI pick${st.ai.length === 1 ? '' : 's'}${st.randN ? ' + ' : ''}` : ''}${st.randN ? `${st.randN} random` : ''}${lowClause(st)} · select to copy for slides`;
+    // No "AI pick" clause anywhere in this one — there are none, and saying "0 AI picks" would
+    // imply the aggregator looked and declined rather than that it was never asked.
+    const interactiveClause = (st) => st.noWritten
+      ? ` · ${st.noWritten} did the interactive lesson (no free-response question)` : '';
+    const freeNote = (st) => st.showAll
+      ? `all ${st.pool.length} responses${interactiveClause(st)} · select to copy for slides`
+      : `${st.randN} of ${st.pool.length}, at random${interactiveClause(st)} · select to copy for slides`;
+
+    /**
+     * Both panels, in reading order: what they made of the reading, then what they made of the
+     * question. The free-response panel is absent — not empty — when nothing produced one, which
+     * is every interactive-only assignment.
+     */
+    function responsesSection(rows, roster, analysis, singleScope, lesson) {
+      if (!singleScope) { respStates = {}; return ''; }
+      respStates = {};
+      const refl = buildResponses(rows, roster, analysis);
+      const free = buildFreeResponses(rows, roster);
+      return responsePanel('sr', {
+             title: 'Student Reading Reflections', ...refl, note: reflectionNote })
+           + responsePanel('fr', {
+             title: 'Student Free Responses', ...free, note: freeNote,
+             prompt: promptBlock(lesson?.freeQuestion) });
+    }
+    // Selection is keyed on the quote TEXT, not on DOM identity, so it survives a re-render —
+    // which the names toggle now performs (see srCard on why hiding is not enough).
+    //
+    // The NOTE is recomputed from the panel's own `note()` rather than rebuilt inline. It used to
+    // be written here in a second copy of the sentence built in responsesSection(), which is
+    // exactly the drift a second panel would have made permanent: two panels × two copies is four
+    // places to keep one sentence right.
+    /**
+     * The two labels that depend on what is selected, recomputed from the DOM.
+     *
+     * Read rather than tracked, because the selection already lives in the DOM (`.sel`) and is
+     * re-derived on every render from the quote TEXT — a parallel count would be a second source
+     * of truth for the same fact, and the one that goes stale. Called from three places: after a
+     * render, after a card click, and after the select-all button.
+     */
+    function refreshSelUI(p) {
+      const list = document.getElementById(`${p}-list`); if (!list) return;
+      const shown = list.querySelectorAll('.sr-quote').length;
+      const n = list.querySelectorAll('.sr-quote.sel').length;
+      const copyBtn = document.getElementById(`${p}-copy`);
+      if (copyBtn) copyBtn.textContent = n ? `Copy selected (${n})` : 'Copy selected';
+      const selBtn = document.getElementById(`${p}-sel`);
+      if (selBtn) {
+        // "All" means all CURRENTLY DISPLAYED, which in the sampled view is the 8 on screen and
+        // not the pool behind them — the button is a shortcut for clicking what you can see, so
+        // pairing it with "Show all" is how you reach the whole cohort. Flipping to Clear at that
+        // point is what makes it undoable: without it, deselecting means clicking every card back.
+        const all = shown > 0 && n === shown;
+        selBtn.setAttribute('aria-pressed', String(all));
+        selBtn.classList.toggle('on', all);
+        selBtn.textContent = all ? 'Clear selection' : 'Select all shown';
+      }
+    }
+
+    function drawResponses(p, keepSelected) {
+      const st = respStates[p];
+      const list = document.getElementById(`${p}-list`); if (!list || !st) return;
+      const sel = keepSelected
+        ? new Set([...list.querySelectorAll('.sr-quote.sel')].map(c => c.dataset.text))
+        : null;
+      // AI picks stay pinned on top in both modes — "show all" widens the sample, it does not
+      // discard the argued-for showcase quotes or reorder them into the crowd.
+      // The not-meaningful reflections come last, tagged, and only in the full listing.
+      const body = st.showAll ? st.pool : st.sample;
+      list.innerHTML = st.ai.map(q => srCard(q, true, st.namesOn)).join('')
+        + body.map(q => srCard(q, false, st.namesOn)).join('')
+        + (st.showAll ? st.hidden.map(q => srCard(q, false, st.namesOn, true)).join('') : '');
+      if (sel) list.querySelectorAll('.sr-quote').forEach(c => {
+        if (sel.has(c.dataset.text)) c.classList.add('sel');
+      });
+      const note = document.getElementById(`${p}-note`);
+      if (note) note.textContent = '· ' + PANEL_NOTE[p](st);
+      list.querySelectorAll('.sr-quote').forEach(c => c.addEventListener('click', () => { c.classList.toggle('sel'); refreshSelUI(p); }));
+      refreshSelUI(p);
+    }
+    const PANEL_NOTE = { sr: reflectionNote, fr: freeNote };
+
+    /** Wire whichever panels rendered. Neither is guaranteed — see responsesSection. */
+    function wireResponses() { Object.keys(respStates).forEach(wireResponsePanel); }
+
+    function wireResponsePanel(p) {
+      const st = respStates[p];
+      if (!document.getElementById(`${p}-sec`) || !st) return;
+      drawResponses(p);
+      const namesBtn = document.getElementById(`${p}-names`);
+      namesBtn?.addEventListener('click', () => {
+        st.namesOn = !st.namesOn;
+        namesBtn.setAttribute('aria-pressed', st.namesOn); namesBtn.classList.toggle('on', st.namesOn);
+        // Re-render rather than unhide (see srCard), preserving what the instructor had selected.
+        drawResponses(p, true);
+      });
+      const allBtn = document.getElementById(`${p}-all`);
+      allBtn?.addEventListener('click', () => {
+        st.showAll = !st.showAll;
+        allBtn.setAttribute('aria-pressed', String(st.showAll));
+        allBtn.classList.toggle('on', st.showAll);
+        allBtn.textContent = st.showAll ? `Show sample` : `Show all ${st.ai.length + st.pool.length + st.hidden.length}`;
+        // Shuffling a full listing is meaningless — hide it rather than leave a dead control.
+        const sh = document.getElementById(`${p}-shuffle`);
+        if (sh) sh.hidden = st.showAll;
+        drawResponses(p);
+      });
+      document.getElementById(`${p}-shuffle`)?.addEventListener('click', () => { st.sample = sampleN(st.pool, st.randN); drawResponses(p); });
+      // Wired ONCE, here, rather than inside drawResponses: the cards are replaced on every render
+      // so their listeners go with them, but this button is not — binding it there would stack a
+      // fresh listener on every names toggle, shuffle and show-all.
+      document.getElementById(`${p}-sel`)?.addEventListener('click', () => {
+        const cards = [...document.querySelectorAll(`#${p}-list .sr-quote`)];
+        const select = cards.some(c => !c.classList.contains('sel'));
+        cards.forEach(c => c.classList.toggle('sel', select));
+        refreshSelUI(p);
+      });
+      document.getElementById(`${p}-copy`)?.addEventListener('click', async () => {
+        const sel = [...document.querySelectorAll(`#${p}-list .sr-quote.sel`)]; if (!sel.length) return;
+        const btn = document.getElementById(`${p}-copy`);
+        const text = sel.map(c => st.namesOn ? `"${c.dataset.text}"\n— ${c.dataset.name} (${c.dataset.sec})` : `"${c.dataset.text}"`).join('\n\n');
+        try { await navigator.clipboard.writeText(text); btn.textContent = '✓ Copied'; setTimeout(() => refreshSelUI(p), 1200); }
+        catch (e) { btn.textContent = 'Copy blocked'; setTimeout(() => refreshSelUI(p), 1400); }
+      });
+    }
+
+    // ── Did not submit ──
+    //
+    // Rebuilt from the legacy Report tab, which promotion deletes (LEGACY-AUDIT-2026-07-20.md §2.2).
+    // The legacy version was inert HTML — no sort, no export, no click-through — and the audit's
+    // recommendation was to rebuild it ACTIONABLE, because the list exists to drive follow-up.
+    // So: copyable, and it points at the page where an extension is granted.
+    //
+    // Renders only when someone has not submitted; an empty list is not a panel worth drawing.
+    let dnsState = null;
+    function notSubmittedSection(roster) {
+      const it = vm.interactions.find(x => x.id === reportInteraction);
+      const done = new Set(it?.doneStudentIds || []);
+      const missing = roster.filter(st => !done.has(st.student_id))
+        .sort((a, b) => String(a.section).localeCompare(String(b.section))
+                     || lastFirst(a.name).localeCompare(lastFirst(b.name)));
+      dnsState = missing;
+      if (!missing.length) return '';
+      const rows = missing.map(st => `<tr data-enr="${esc(st.enrollment_id || '')}">
+          <td class="dns-pick"><input type="checkbox" data-dns-pick
+                 ${st.enrollment_id ? '' : 'disabled title="No enrollment row — cannot be extended here"'}
+                 aria-label="Select ${esc(lastFirst(st.name))}"></td>
+          <td>${esc(lastFirst(st.name))}</td>
+          <td><span class="tag">${esc(st.section)}</span></td>
+          <td class="dns-id">${esc(String(st.student_id))}</td>
+          <td style="text-align:right">${st.enrollment_id
+            ? `<button class="tbtn dns-ext" type="button" data-ext-one="${esc(st.enrollment_id)}"
+                       title="Grant an extension to ${esc(lastFirst(st.name))}">Extend</button>` : ''}</td>
+        </tr>`).join('');
+      return `<div class="lr-sec fw-panel" id="dns-sec">
+        <div class="lr-eyebrow">Did not submit
+          <span class="dim">· ${missing.length} of ${roster.length} in this scope</span></div>
+        <div class="sr-controls">
+          <button class="tbtn" id="dns-copy" type="button">Copy list</button>
+          <button class="tbtn" id="dns-ext-many" type="button" disabled>Extend selected</button>
+          <span class="spacer"></span>
+          <span class="muted" style="font-size:0.8em">Extending here writes the same row the Grade tab does.</span>
+        </div>
+        <div class="table-wrap" style="margin-top:10px"><table class="dns-tbl">
+          <thead><tr>
+            <th class="dns-pick"><input type="checkbox" id="dns-all" aria-label="Select everyone listed"></th>
+            <th>Name</th><th>Section</th><th>Cadet ID</th><th></th>
+          </tr></thead>
+          <tbody>${rows}</tbody></table></div>
+      </div>`;
+    }
+    function wireNotSubmitted() {
+      const sec = document.getElementById('dns-sec');
+      if (!sec || !dnsState) return;
+
+      const btn = document.getElementById('dns-copy');
+      btn?.addEventListener('click', async () => {
+        const text = dnsState.map(st => `${lastFirst(st.name)}\t${st.section}\t${st.student_id}`).join('\n');
+        try {
+          await navigator.clipboard.writeText(text);
+          const old = btn.textContent; btn.textContent = '✓ Copied';
+          setTimeout(() => { btn.textContent = old; }, 1200);
+        } catch (e) { btn.textContent = 'Copy blocked'; setTimeout(() => { btn.textContent = 'Copy list'; }, 1400); }
+      });
+
+      const picks = () => [...sec.querySelectorAll('[data-dns-pick]:checked')]
+        .map(cb => cb.closest('tr')?.dataset.enr).filter(Boolean);
+      const many = document.getElementById('dns-ext-many');
+      const refresh = () => {
+        const n = picks().length;
+        many.disabled = n === 0;
+        many.textContent = n ? `Extend selected (${n})` : 'Extend selected';
+      };
+      sec.querySelectorAll('[data-dns-pick]').forEach(cb => cb.addEventListener('change', refresh));
+      document.getElementById('dns-all')?.addEventListener('change', (e) => {
+        sec.querySelectorAll('[data-dns-pick]:not([disabled])').forEach(cb => { cb.checked = e.target.checked; });
+        refresh();
+      });
+      many?.addEventListener('click', () => openExt(picks()));
+      sec.querySelectorAll('[data-ext-one]').forEach(b =>
+        b.addEventListener('click', () => openExt([b.dataset.extOne])));
+      refresh();
+    }
+
+    // ── Grant an extension from the rollup ──
+    // Same write the Grade tab performs (G.setExtension → upsert on the (enrollment, offering)
+    // UNIQUE key), so granting here and there cannot diverge, and re-granting amends rather than
+    // duplicating. One reason covers the batch: `reason` is NOT NULL with a non-blank CHECK since
+    // migration 007, and a set of students extended together share the cause that prompted it.
+    let extTargets = [];
+    function openExt(enrollmentIds) {
+      extTargets = enrollmentIds.filter(Boolean);
+      if (!extTargets.length) return;
+      const byEnr = Object.fromEntries(dnsState.map(st => [String(st.enrollment_id), st]));
+      const names = extTargets.map(id => lastFirst(byEnr[String(id)]?.name || '—'));
+      document.getElementById('xm-title').textContent =
+        extTargets.length === 1 ? 'Grant extension' : `Grant ${extTargets.length} extensions`;
+      document.getElementById('xm-who').textContent =
+        names.length <= 4 ? names.join(', ')
+                          : `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`;
+      // Default to a week out at 2359 local — the shape every real deadline in this system takes
+      // (CORE.md §2: due dates are 2359 the night before). The grader can change it.
+      const d = new Date(); d.setDate(d.getDate() + 7); d.setHours(23, 59, 0, 0);
+      const pad = n => String(n).padStart(2, '0');
+      document.getElementById('xm-due').value =
+        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      document.getElementById('xm-reason').value = '';
+      document.getElementById('xm-status').textContent = '';
+      document.getElementById('ext-modal').classList.add('open');
+      document.getElementById('xm-reason').focus();
+    }
+
+    async function saveExt() {
+      const status = document.getElementById('xm-status');
+      const iso = document.getElementById('xm-due').value;
+      const reason = document.getElementById('xm-reason').value.trim();
+      if (!iso) { status.textContent = 'Pick a new deadline.'; return; }
+      if (!reason) { status.textContent = 'A reason is required — it is recorded with the extension.'; return; }
+      const btn = document.getElementById('xm-save');
+      btn.disabled = true; status.textContent = 'Granting…';
+      const when = new Date(iso).toISOString();
+      let ok = 0, reopenedN = 0; const errs = [];
+      // Sequential, not Promise.all: these are upserts on one table and a partial failure must be
+      // reportable per student rather than collapsing to one rejected promise.
+      for (const enr of extTargets) {
+        const { error, reopened } = await G.setExtension(ctx, reportInteraction, enr, when, reason);
+        if (error) errs.push(error.message); else { ok++; if (reopened) reopenedN++; }
+      }
+      btn.disabled = false;
+      if (errs.length) {
+        status.style.color = 'var(--red)';
+        status.textContent = `Granted ${ok} of ${extTargets.length}. ${errs[0]}`;
+        return;
+      }
+      document.getElementById('ext-modal').classList.remove('open');
+      // The rollup's own numbers do not change — an extension moves a deadline, it does not submit
+      // work — so there is nothing to re-render. Say what happened instead of silently closing.
+      const note = document.getElementById('dns-sec')?.querySelector('.lr-eyebrow .dim');
+      if (note) note.textContent += ` · ${ok} extension${ok === 1 ? '' : 's'} granted`;
+      // A bulk grant is where a silent re-open would do the most damage unnoticed — this list is
+      // built from students who did not submit, so most of a batch can come back down at once.
+      if (reopenedN) alert(`${ok} extension${ok === 1 ? '' : 's'} granted.\n\n${reopenedN} of them ` +
+                           `had a published grade, which has been re-opened — otherwise the ` +
+                           `extension would not have let them back in. Those scores are hidden ` +
+                           `until you finalize again on the Grade page.`);
+    }
+
+    // Rollup body — effort + radar tiles, AI panels, per-objective rows, student responses.
+    // `analysis` is the cohort AI row for the current scope (or null → "coming soon" placeholders).
+    function aggregateHTML(s, rows, roster, analysis) {
+      if (!s.n) return `<div class="summary-placeholder">No reports submitted in this scope yet — the summary appears once students submit.</div>`;
+
+      const radar = radarSVG(s.objectives, s.radar, s.paths);
+      // How this cohort worked the lesson. Every number in the rollup is read against it — the
+      // effort distribution in particular is now ONE population across both paths.
+      const mixNote = s.paths?.interactiveN && s.paths?.writtenN
+        ? `· ${s.paths.interactiveN} interactive + ${s.paths.writtenN} questions`
+        : s.paths?.writtenN ? '· question set' : '· interactive';
+      // Reading time. This panel is now Q1's ONLY home — the per-question block that used to
+      // repeat it is gone — so it must appear whenever anyone on the question set could have
+      // answered, not only when someone named a duration. A cohort that all answered Q1 without
+      // stating a number (assessed 0, notStated > 0) previously rendered nothing at all, which
+      // read as "nobody was asked" rather than "nobody said". readingChart's own empty state
+      // carries that distinction.
+      //
+      // Still hidden for an interactive-only cohort: Q1 does not exist on that path, and an empty
+      // panel there would imply the class read nothing.
+      const askedReading = (s.reading?.assessed || 0) + (s.reading?.notStated || 0) > 0;
+      const rtSec = askedReading ? `<div class="lr-sec fw-panel">
+          <div class="lr-eyebrow">Time spent reading <span class="dim">· Q1 · ${s.reading.assessed} of ${s.n} reported · anonymous</span></div>
+          ${readingChart(s.reading)}
+        </div>` : '';
+
+      const row2 = `<div class="lr-sec sum-row2">
+        <div class="sum-cell">
+          <div class="lr-eyebrow">Effort distribution <span class="dim">${s.effort.avg == null ? '' : '· ' + f1(s.effort.avg) + ' / 5 avg'} ${mixNote}</span></div>
+          ${effortChart(s.effort)}
+        </div>
+        <div class="sum-cell">
+          <div class="lr-eyebrow">Objective understanding <span class="dim">${s.radar?.available ? '· dashed line marks threshold' : ''}</span></div>
+          <div class="radar-wrap">${radar}<div class="radar-tip"></div></div>
+        </div>
+      </div>`;
+
+      // ── AI readiness summary ──
+      // Written per INSTRUCTOR across every section they teach, not per section. Two sections of
+      // the same lesson taught by one person got two isolated paragraphs that could not be compared;
+      // one summary plus an explicit list of where a section departed from it says more in less
+      // space. A single section therefore shows its instructor's summary (currentAnalysis() borrows
+      // it) while keeping its own numbers, quotes and recommendation.
+      const readiness = analysis && analysis.readiness_summary;
+      const notes = (analysis && Array.isArray(analysis.section_notes)) ? analysis.section_notes : [];
+      // On a single section, only that section's departure is relevant — the others describe
+      // cohorts the reader did not select.
+      const oneSec = singleSectionScope();
+      const shownNotes = oneSec ? notes.filter(nt => String(nt?.section_id) === String(oneSec)) : notes;
+      const codeFor = nt => nt?.section_code || (vm.sections.find(x => x.id === nt?.section_id)?.code) || 'Section';
+      const notesHTML = shownNotes.length ? `<div class="ai-secnotes">`
+        + shownNotes.map(nt => `<p class="ai-secnote"><strong>${esc(codeFor(nt))}</strong> — ${esc(nt.note || '')}</p>`).join('')
+        + `</div>` : '';
+
+      // Name the sections the summary was written over, from the STORED section_codes rather than
+      // from the prose. Verifying that none of your sections was left out has to be deterministic —
+      // an AI sentence saying "both sections" is not evidence. Chrome, so it costs the summary no words.
+      //
+      // Shown whenever the summary spans more than one section, INCLUDING on a single-section view.
+      // That case is the one that most needs it and the one an earlier `!oneSec` guard wrongly
+      // suppressed: selecting M1A and reading a summary that opens "Both sections have the concept"
+      // is exactly where a reader cannot tell what they are looking at. The wording adapts, because
+      // on a single section the point is that the summary is BROADER than the tab you picked.
+      const combined = (analysis?.section_codes || []).filter(Boolean);
+      const combinedBar = (readiness && combined.length > 1)
+        ? `<div class="ai-combined">${oneSec ? 'This summary covers' : 'Combining'}
+             <strong>${combined.map(esc).join('</strong> + <strong>')}</strong>
+             <span class="dim">· ${analysis?.meta?.n ?? s.n} students${
+               oneSec ? ` · the charts below show ${esc(vm.sections.find(x => x.id === oneSec)?.code || 'this section')} only` : ''}</span></div>`
+        : '';
+
+      const whoNote = analysis?.instructor_name && !oneSec
+        ? ` · ${esc(analysis.instructor_name)}'s sections` : '';
+      // Reading the course rollup shows a summary written over the whole course while the numbers
+      // above it come from only the rows the viewer can load. Saying so is the honest fix; the
+      // alternative is silently pairing whole-course prose with a partial cohort.
+      const allMeta = analysis?.meta?.n;
+      const scopeMismatch = reportScope === 'all' && Number.isInteger(allMeta) && allMeta > s.n
+        ? `<p class="ai-scope-warn">This summary covers the whole course (${allMeta} students). The charts above
+             show only the ${s.n} you have access to.</p>` : '';
+      const aiSec = `<div class="lr-sec fw-panel">
+        <div class="lr-eyebrow">AI readiness summary <span class="dim">${readiness ? aiGenNote(analysis, s.n) + whoNote : '· coming soon'}</span></div>
+        ${readiness ? combinedBar + aiProse(analysis.readiness_summary) + notesHTML + scopeMismatch
+          : aiPlaceholder('A short read on how ready the class is for this assignment — engagement, where understanding is solid vs. shaky, and what to cover in class — will be generated here once the assignment has been aggregated.')}
+      </div>`;
+
+      // ── Misconceptions ──
+      // The trends paragraph that used to sit here was removed 2026-07-22. It restated the bars in
+      // prose, and now that each bar carries its own description and student evidence it had nothing
+      // left to add — while still costing a full AI panel and a "coming soon" placeholder under
+      // fully-populated bars. The one-line recommendation is what survives, because it is the only
+      // part that told an instructor to DO something.
+      const reco = analysis && analysis.misconception_recommendation;
+      const mcSec = `<div class="lr-sec fw-panel">
+        <div class="lr-eyebrow">Misconceptions <span class="dim">· share of submitted students, most common first · select one for detail</span></div>
+        ${mcBars(s.misconceptions, s.n)}
+        ${reco ? `<p class="ai-reco"><span class="ai-reco-lab">Recommendation</span>${esc(reco)}</p>` : ''}
+      </div>`;
+
+      // The written path's free-response understanding is charted here exactly like an
+      // objective — same 0–5 chart, same row — but it always sits FIRST rather than taking its
+      // place in the weakest-first order, so it keeps one seat across every lesson and section.
+      // It carries a small "questions" tag so nobody reads it as an authored objective: it is one
+      // score for one question, not a resolved learning objective. (When the analysis can tease
+      // actual objectives out of the free-response answer, this row is what gets replaced by
+      // several — nothing else here has to change.)
+      const objRows = s.objectives.map(o => {
+        const isFR = o.source === 'written';
+        return `<div class="obj-row${isFR ? ' obj-row-fr' : ''}">
+        <div class="obj-row-head">
+          <span class="nm"><b class="ol-key sm">${o.letter}</b>${esc(o.label)}${
+            isFR ? `<span class="obj-src" title="From the written question set — one free-response question, not a per-objective breakdown">questions</span>` : ''}</span>
+          <span class="mu">${o.understanding == null ? 'n/a' : f1(o.understanding) + '/5'} · ${o.assessed} assessed</span></div>
+        ${objChart(o.dist)}
+      </div>`;
+      }).join('');
+      const hasFR = s.objectives.some(o => o.source === 'written');
+      const objMix = hasFR && s.objectives.some(o => o.source === 'interactive')
+        ? '· free response first, then weakest first · interactive objectives + the written free response'
+        : hasFR ? '· free response first, then weakest first'
+        : '· weakest first';
+      const objSec = s.objectives.length ? `<div class="lr-sec obj-box">
+        <div class="lr-eyebrow">Understanding by objective <span class="dim">${objMix}</span></div>${objRows}</div>` : '';
+
+      return row2 + rtSec + aiSec + mcSec + objSec
+           // The lesson itself, for the free-response panel's prompt. Resolved from vm rather than
+           // threaded through aggregateHTML's arguments, which are the SUMMARY of a scope — the
+           // question being asked is a property of the assignment and is the same in every scope.
+           + responsesSection(rows, roster, analysis, singleSectionScope(),
+                              vm.interactions.find(x => x.id === reportInteraction))
+           + notSubmittedSection(roster);
+    }
+
+    // ── Flags: header pills → flagged-students list → one student summary → full report ──
+
+    // The 0–5 effort as a NUMBER. Deliberately not the `num` helper in studentSummary(), which
+    // formats for display ("3/5") and would compare as NaN here.
+    const effortNum = d => (Number.isInteger(d?.effort) ? d.effort : null);
+
+    const FLAGS = [
+      { key: 'notable',         label: 'Notable',                 cls: 'green',  icon: '★', desc: 'Exemplary work — the strongest understanding or a notable extension beyond the objectives.', pred: d => d?.flags?.notable === true,         count: s => s.flags.notable },
+      { key: 'needs_follow_up', label: 'Needs follow-up',         cls: '',       icon: '⚑', desc: 'Low effort or weak understanding — a good candidate to check in with.',                    pred: d => d?.flags?.needs_follow_up === true, count: s => s.flags.needs_follow_up },
+      // The predicate reads EFFORT, not just `meaningful`, because the label is a claim about
+      // effort. Finalizing full credit raises a capped effort to 3 and deliberately leaves the
+      // AI's `meaningful` judgement alone (confirmEffortRows in faculty-grade.js), so keying on
+      // `meaningful` alone kept flagging students an instructor had already cleared — while they
+      // sat on every point the assignment was worth.
+      { key: 'refl_capped',     label: 'Reflection capped',       cls: 'gold',   icon: '✎', desc: 'Reading reflection was not meaningful, so effort was capped at 2. Clears when an instructor publishes full credit.', pred: d => !!d?.reading_reflection && d.reading_reflection.meaningful === false && !(effortNum(d) > 2), count: s => s.reflection.capped },
+      { key: 'honor_disclosed', label: 'Inappropriate resources', cls: 'danger', icon: '⚠', desc: 'Used another AI or other disallowed help/resources — inappropriate for this assignment. Talking with a classmate beforehand is fine and is not flagged.', pred: d => d?.honor?.status === 'disclosed', count: s => s.honor.disclosed },
+      { key: 'honor_concern',   label: 'Integrity concern',       cls: 'danger', icon: '⚖', desc: 'Possible integrity problem in the conversation — e.g. manipulating the AI into inflating the report or gaming the effort grade.', pred: d => d?.honor?.status === 'concern',   count: s => s.honor.concern },
+      // Residual flags. Deliberately last, neutral (no `cls`), and described by what was actually
+      // coined rather than by a fixed meaning — the system does not know what these mean yet, and
+      // a styled pill would imply it did. Present so a novel flag is a DISCOVERY: without a pill
+      // the container below is only reachable by opening students at random, which would make the
+      // taxonomy work (P3.3) no more observable than dropping the flags outright.
+      { key: 'other', label: 'Unrecognized', cls: '', icon: '?',
+        desc: s => `Flags emitted by the AI that PREP does not recognize, shown verbatim: `
+                 + `${(s.flags.other || []).map(f => `${f.key} (${f.count})`).join(', ')}. `
+                 + `Not counted anywhere else.`,
+        pred: d => I.residualFlags(d?.flags).length > 0, count: s => s.flags.otherStudents },
+    ];
+
+    // Header flag pills — compact icon + count, hover for detail, click to list the students.
+    function renderFlagBar(s) {
+      const bar = document.getElementById('rm-flagbar');
+      const pills = FLAGS.map(f => {
+        const c = f.count(s);
+        if (!c) return '';
+        // `desc` may be a function so a pill can describe the data it actually found — the
+        // residual-flag pill names the keys that were coined, which is the only useful thing it
+        // can say about flags whose meaning is not defined anywhere.
+        const desc = typeof f.desc === 'function' ? f.desc(s) : f.desc;
+        return `<button class="fpill ${f.cls}" data-flag="${f.key}">
+          <span class="ic" aria-hidden="true">${f.icon}</span><span class="ct">${c}</span>
+          <span class="tip"><b>${esc(f.label)} · ${c}</b>${esc(desc)}<span class="go">Click to view students ›</span></span>
+        </button>`;
+      }).filter(Boolean).join('');
+      bar.innerHTML = pills || `<span class="muted" style="font-size:.82em">No flags raised in this scope.</span>`;
+      bar.querySelectorAll('[data-flag]').forEach(b => b.addEventListener('click', () => openFlagList(b.dataset.flag)));
+    }
+
+    // After the rollup HTML is in the DOM: wire the radar hover tooltips + the responses panel.
+    function wireRollup() {
+      const rwrap = document.querySelector('#rm-aggregate .radar-wrap'), rtip = rwrap && rwrap.querySelector('.radar-tip');
+      if (rwrap && rtip) rwrap.querySelectorAll('.radar-hit').forEach(h => {
+        h.addEventListener('mouseenter', () => {
+          rtip.innerHTML = `<span class="rt-l"></span><span class="rt-m"></span>`;
+          rtip.querySelector('.rt-l').textContent = h.dataset.l;
+          rtip.querySelector('.rt-m').textContent = h.dataset.m + ' / 5 mean';
+          const r = h.getBoundingClientRect(), w = rwrap.getBoundingClientRect();
+          rtip.style.left = (r.left + r.width / 2 - w.left) + 'px';
+          rtip.style.top  = (r.top - w.top) + 'px';
+          rtip.style.display = 'block';
+        });
+        h.addEventListener('mouseleave', () => { rtip.style.display = 'none'; });
+      });
+      wireMisconceptionPops();
+      wireResponses();
+      wireNotSubmitted();
+    }
+
+    // Misconception detail popovers. Hover is handled entirely in CSS (:hover on the row); this
+    // adds the click/keyboard path, because hover alone is unreachable by keyboard and unusable on
+    // a touch screen. Clicking pins one open; clicking it again, opening another, pressing Escape,
+    // or clicking outside closes it.
+    function wireMisconceptionPops() {
+      const rows = [...document.querySelectorAll('#rm-aggregate .mc-row.has-pop')];
+      if (!rows.length) return;
+      const closeAll = (except) => rows.forEach(r => {
+        if (r === except) return;
+        r.classList.remove('pin');
+        r.querySelector('.mc-label')?.setAttribute('aria-expanded', 'false');
+      });
+      rows.forEach(row => {
+        const btn = row.querySelector('.mc-label');
+        btn?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const open = !row.classList.contains('pin');
+          closeAll(row);
+          row.classList.toggle('pin', open);
+          btn.setAttribute('aria-expanded', String(open));
+        });
+      });
+      // One listener per render, not per row. Re-registering on every renderAggregate is harmless
+      // because the previous DOM (and its listeners) is discarded with innerHTML.
+      document.addEventListener('click', () => closeAll(null));
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAll(null); });
+    }
+
+    // The students (in scope) whose submitted report fired a given flag.
+    function studentsForFlag(flagKey) {
+      const it = vm.interactions.find(x => x.id === reportInteraction);
+      const done = new Set(it?.doneStudentIds || []);
+      const f = FLAGS.find(x => x.key === flagKey);
+      if (!f) return [];
+      return rosterInScope().filter(st => {
+        const row = reportByStudent[String(st.student_id)];
+        return done.has(st.student_id) && row && f.pred(row.report_data);
+      });
+    }
+
+    // Flag pill → modal listing the matching students by name + section only.
+    function openFlagList(flagKey) {
+      const f = FLAGS.find(x => x.key === flagKey);
+      const matched = studentsForFlag(flagKey);
+      document.getElementById('fm-title').textContent = `${f ? f.label : flagKey} · ${matched.length} student${matched.length === 1 ? '' : 's'}`;
+      const body = document.getElementById('fm-body');
+      body.innerHTML = matched.length ? matched.map(st =>
+        `<button class="fl-row" data-id="${esc(st.student_id)}" data-name="${esc(st.name)}" data-sec="${esc(st.section)}"><span class="fl-name">${esc(st.name)}</span><span class="fl-sec">${esc(st.section)}</span><span class="fl-go">View ›</span></button>`).join('')
+        : `<div class="muted">No students match this flag in scope.</div>`;
+      body.querySelectorAll('[data-id]').forEach(b => b.addEventListener('click', () => openStudent(b.dataset.id, b.dataset.name, b.dataset.sec)));
+      document.getElementById('flag-modal').classList.add('open');
+    }
+
+    // A student → their structured summary panel (stacks above the flag list), with a button to the full report.
+    function openStudent(studentId, name, section) {
+      const row = reportByStudent[String(studentId)];
+      document.getElementById('sm-title').textContent = `${name}${section ? ' · ' + section : ''}`;
+      const panel = studentPanelHTML(row) || '<div class="muted" style="font-size:0.86em">No structured summary for this report.</div>';
+      document.getElementById('sm-body').innerHTML = panel
+        + `<div class="row" style="justify-content:flex-end;margin-top:14px"><button class="btn btn-secondary btn-sm" id="sm-full">View full report ↗</button></div>`;
+      document.getElementById('sm-full').addEventListener('click', () => openFullReport(studentId, name));
+      wireOverrides(studentId, name, section);
+      document.getElementById('student-modal').classList.add('open');
+    }
+
+    /**
+     * Wire the clear/restore controls in the student panel. Re-run on every open, and after every
+     * decision, because both rebuild `#sm-body` — so these listeners go with the markup they were
+     * attached to and never accumulate.
+     */
+    function wireOverrides(studentId, name, section) {
+      const body = document.getElementById('sm-body');
+      const row = reportByStudent[String(studentId)];
+      if (!body || !row) return;
+
+      body.querySelectorAll('[data-ov-restore]').forEach(b => b.addEventListener('click',
+        () => applyOverride(row, b.dataset.ovRestore, false, null, studentId, name, section)));
+
+      // Clearing is two-step. A reason is REQUIRED for an integrity flag (CLEARABLE_FLAGS) and the
+      // field is the only place to type one, so the click opens the form rather than acting.
+      body.querySelectorAll('[data-ov-clear]').forEach(b => b.addEventListener('click', () => {
+        const flag = b.dataset.ovClear;
+        const from = b.dataset.ovFrom || null;
+        const required = !!I.CLEARABLE_FLAGS[flag]?.reasonRequired;
+        const form = document.createElement('span');
+        form.className = 'ov-form';
+        form.innerHTML = `<input class="ov-why" type="text" maxlength="200"
+            placeholder="${required ? 'Why is this not an issue?' : 'Reason (optional)'}"
+            aria-label="Reason for clearing this flag">
+          <button class="tbtn ov-go" type="button">Clear flag</button>
+          <button class="tbtn ov-cancel" type="button">Cancel</button>
+          <span class="ov-err"></span>`;
+        b.replaceWith(form);
+        const why = form.querySelector('.ov-why');
+        why.focus();
+        const go = () => applyOverride(row, flag, true, why.value, studentId, name, section, form, from);
+        form.querySelector('.ov-go').addEventListener('click', go);
+        form.querySelector('.ov-cancel').addEventListener('click', () => openStudent(studentId, name, section));
+        why.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+      }));
+    }
+
+    async function applyOverride(row, flag, cleared, reason, studentId, name, section, form, from) {
+      const btn = form?.querySelector('.ov-go');
+      const errEl = form?.querySelector('.ov-err');
+      if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+      if (errEl) errEl.textContent = '';
+
+      const { error } = await I.setFlagOverride(ctx, {
+        offeringId: reportInteraction,
+        enrollmentId: row.enrollment_id,
+        flag, cleared, from: cleared ? from : null, reason,
+      });
+      if (error) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Clear flag'; }
+        const msg = error.message || 'Could not save that.';
+        if (errEl) errEl.textContent = msg; else alert(msg);
+        return;
+      }
+
+      // Mirror the write into the loaded rows instead of refetching the lesson. The pills and the
+      // counts recompute from `reportRows` (summarizeReports reads `report_data`), so this is all
+      // renderAggregate needs — and a reload would tear down the modal the instructor is working
+      // in, mid-review of a student.
+      const next = { ...(row.flag_overrides || {}) };
+      if (cleared) {
+        next[flag] = {
+          cleared: true, from: from ?? null, by: ctx.user.id, at: new Date().toISOString(),
+          ...(String(reason || '').trim() ? { reason: String(reason).trim() } : {}),
+        };
+      } else {
+        delete next[flag];
+      }
+      row.flag_overrides = Object.keys(next).length ? next : null;
+      row.report_data = I.applyFlagOverrides(row.report_data_ai, row.flag_overrides);
+
+      renderAggregate();
+      openStudent(studentId, name, section);
+    }
+
+    // The full Markdown report for one student, in its own modal (stacks above the student summary).
+    async function openFullReport(studentId, name) {
+      document.getElementById('fr-title').textContent = name || 'Report';
+      const body = document.getElementById('fr-body');
+      body.innerHTML = `<div class="center-load"><span class="spinner"></span></div>`;
+      document.getElementById('fullreport-modal').classList.add('open');
+      // This viewer was broken by the same ReferenceError as the rollup — it reaches the activity
+      // through activitiesOf() too — and showed a spinner forever for the same reason: an awaited
+      // rejection with nothing to catch it. Distinguish "no report" from "could not load one".
+      let md = null;
+      try {
+        md = await I.loadReport(ctx, reportInteraction, studentId);
+      } catch (err) {
+        console.error('[report] loadReport failed:', err);
+        body.innerHTML = `<div class="alert alert-error">Could not load this student's report.
+          <div class="muted" style="margin-top:6px;font-size:.9em">${esc(err?.message || String(err))}</div></div>`;
+        return;
+      }
+      // Report markdown is an inert, user-controllable blob — sanitize at render time.
+      body.innerHTML = md ? DOMPurify.sanitize(marked.parse(md))
+        : `<div class="alert alert-info">This student hasn't submitted a report for this interaction yet.</div>`;
+    }
+
+    /**
+     * One clearable flag's control: the offer to overrule it while it stands, the decision and its
+     * undo once it has been overruled.
+     *
+     * An AI can raise "Inappropriate resources" on a cadet whose only crime was running the
+     * preflight twice to understand it better. The instructor is the one who knows that, and if
+     * the pill cannot be cleared the integrity signal turns into noise the first time it is wrong
+     * about somebody. See the header over applyFlagOverrides() in faculty-rollup.js for where the
+     * decision is stored and why it is not stored with the flag it overrules.
+     *
+     * Rendered inert, with the reason, when there is no grade row to record the decision on —
+     * better than a button that fails on click.
+     */
+    function overrideControl(flag, raised, ov, row, fromValue) {
+      const o = ov?.[flag];
+      if (o?.cleared) {
+        const when = o.at ? new Date(o.at).toLocaleDateString() : '';
+        const bits = [
+          o.from ? `was <b>${esc(String(o.from))}</b>` : '',
+          when ? esc(when) : '',
+          o.reason ? `“${esc(o.reason)}”` : '',
+        ].filter(Boolean).join(' · ');
+        return `<span class="ov-done">cleared${bits ? ` — ${bits}` : ''}</span>`
+             + `<button class="tbtn ov-btn" data-ov-restore="${esc(flag)}">Restore</button>`;
+      }
+      if (!raised) return '';
+      if (!row?.grade_id) {
+        return `<span class="muted ov-none">Grade this student before clearing the flag</span>`;
+      }
+      return `<button class="tbtn ov-btn" data-ov-clear="${esc(flag)}"
+                      data-ov-from="${esc(String(fromValue ?? ''))}">Not an issue</button>`;
+    }
+
+    // Per-student structured panel shown above the Markdown report. Built from report_data
+    // (the contract's `d`); all free-text fields are escaped (inert). Absent for legacy
+    // reports submitted before structured data existed.
+    function studentPanelHTML(row) {
+      const d = (row && row.report_data && typeof row.report_data === 'object') ? row.report_data : null;
+      const eff = (row && row.effort != null) ? row.effort : (d ? (Number.isInteger(d.effort) ? d.effort : null) : null);
+      const pts = (row && row.score != null) ? row.score : null;
+      if (d == null && eff == null) return '';   // legacy report — nothing structured to show
+
+      const effCls = eff == null ? 'pending' : eff >= 3 ? 'full' : eff >= 1 ? 'partial' : 'zero';
+      const meta = [];
+      if (d?.completed === true) meta.push('✓ completed flow');
+      else if (d?.completed === false) meta.push('did not complete');
+      if (typeof d?.duration_min === 'number') meta.push(`${d.duration_min} min`);
+      if (Number.isInteger(d?.message_count)) meta.push(`${d.message_count} msgs`);
+
+      const sect = (label, html) => html ? `<div class="sp-row"><span class="sp-k">${esc(label)}</span><span class="sp-v">${html}</span></div>` : '';
+      const num = v => Number.isInteger(v) && v >= 0 && v <= 5 ? `${v}/5` : null;
+
+      const understanding = [
+        d && num(d.overall_understanding) ? `assessed ${num(d.overall_understanding)}` : null,
+        d && num(d.self_rated_understanding) ? `self-rated ${num(d.self_rated_understanding)}` : null,
+      ].filter(Boolean).join(' · ');
+
+      const objs = (d && Array.isArray(d.objectives) ? d.objectives : [])
+        .filter(o => o && o.key).map(o => `<span class="tag">${esc(o.label || o.key)}${num(o.understanding) ? ` <b>${num(o.understanding)}</b>` : ''}</span>`).join('');
+
+      const mcs = (d && Array.isArray(d.misconceptions) ? d.misconceptions : [])
+        .filter(m => m && m.id).map(m =>
+          `<li>${esc(m.label || m.id)}${m.severity ? ` <span class="tag ${m.severity === 'major' ? 'gold' : ''}">${esc(m.severity)}</span>` : ''}${m.description ? ` — ${esc(m.description)}` : ''}</li>`).join('');
+
+      const r = d?.reading_reflection;
+      const reflBits = [];
+      // Same split as the pill: `meaningful` is the AI's reading and survives an override, so the
+      // "effort capped" half of the tag is only true while the effort is actually still capped.
+      if (r && typeof r.meaningful === 'boolean') {
+        reflBits.push(r.meaningful ? '<span class="tag">meaningful ✓</span>'
+          : effortNum(d) > 2 ? '<span class="tag">not meaningful — full credit published</span>'
+          : '<span class="tag gold">not meaningful — effort capped</span>');
+      }
+      if (r && num(r.engagement)) reflBits.push(`engagement ${num(r.engagement)}`);
+      if (r && r.sentiment) reflBits.push(esc(r.sentiment));
+      const reflText = r && r.text ? `<div class="sp-quote">${esc(r.text)}</div>` : '';
+
+      // The two NEGATIVE flags an instructor can overrule. `d` here is already corrected
+      // (applyFlagOverrides ran in loadReportRows), so a cleared honor status reads as 'none' and
+      // the tag below simply does not render — the decision itself comes from `flag_overrides`.
+      const ov = row?.flag_overrides || null;
+
+      const honor = d?.honor;
+      const honorRaised = honor?.status === 'disclosed' || honor?.status === 'concern';
+      const honorTag = honorRaised
+        ? `<span class="tag ${honor.status === 'concern' ? 'danger' : 'gold'}">${esc(honor.status)}</span>${honor.note ? ` ${esc(honor.note)}` : ''}`
+        : '';
+      const honorCtl = overrideControl('honor', honorRaised, ov, row, honor?.status);
+      const honorHTML = [honorTag, honorCtl].filter(Boolean).join(' ');
+
+      const flags = d?.flags;
+      const nfuRaised = flags?.needs_follow_up === true;
+      const flagBits = [];
+      if (nfuRaised) flagBits.push('<span class="tag gold">needs follow-up</span>');
+      if (flags?.notable === true) flagBits.push('<span class="tag blue">notable</span>');
+      if (flags?.note) flagBits.push(esc(flags.note));
+      // Kept OUT of flagBits: those are joined with " · " as a list of what the AI said, and the
+      // control is not one of them — appending it put a dangling separator before the button.
+      const nfuCtl = overrideControl('needs_follow_up', nfuRaised, ov, row, true);
+
+      // Everything else the producer emitted, verbatim. This widens what used to be a single
+      // hard-coded `flags.note` read: any other key an artifact or /preflight-analyze invented was
+      // dropped here and counted nowhere, so nobody could see what the AI writing it was thinking.
+      // Unstyled on purpose — no colour class, key shown as raw code — because presenting an
+      // unrecognized flag in the vocabulary of the recognized ones would assert a meaning PREP
+      // has not agreed to. Values are escaped like any other untrusted payload field.
+      const residualHTML = I.residualFlags(flags)
+        .map(([k, v]) => `<li><code>${esc(k)}</code>${v ? ` — ${esc(v)}` : ''}</li>`).join('');
+
+      return `<div class="stu-panel">
+        <div class="row wrap" style="gap:10px;align-items:center">
+          <span class="score-badge ${effCls}">Effort ${eff == null ? '—' : eff}/5${pts != null ? ` · ${pts} pt${pts === 1 ? '' : 's'}` : ''}</span>
+          ${meta.length ? `<span class="muted" style="font-size:0.82em">${esc(meta.join(' · '))}</span>` : ''}
+        </div>
+        ${d?.effort_rationale ? `<div class="sp-note">${esc(d.effort_rationale)}</div>` : ''}
+        ${sect('Understanding', understanding ? esc(understanding) : '')}
+        ${sect('Objectives', objs)}
+        ${mcs ? `<div class="sp-row"><span class="sp-k">Misconceptions</span><span class="sp-v"><ul class="sp-list">${mcs}</ul></span></div>` : ''}
+        ${reflBits.length || reflText ? `<div class="sp-row"><span class="sp-k">Reflection</span><span class="sp-v">${reflBits.join(' · ')}${reflText}</span></div>` : ''}
+        ${honorHTML ? sect('Integrity', honorHTML) : ''}
+        ${flagBits.length || nfuCtl ? sect('Flags', flagBits.join(' · ') + nfuCtl) : ''}
+        ${residualHTML ? `<div class="sp-row"><span class="sp-k">Other flags</span><span class="sp-v"><ul class="sp-list">${residualHTML}</ul></span></div>` : ''}
+        ${d?.ai_summary ? sect('Summary', esc(d.ai_summary)) : ''}
+        ${d?.key_strengths ? sect('Strengths', esc(d.key_strengths)) : ''}
+        ${d?.recommended_review ? sect('Review', esc(d.recommended_review)) : ''}
+      </div>`;
+    }
+
+    // Build + download the combined report for this lesson (all in-scope sections),
+    // for handoff to the analysis aggregator.
+    function downloadText(filename, text) {
+      const url = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    }
+    async function exportCorpus() {
+      if (!reportInteraction) return;
+      const btn = document.getElementById('rm-export');
+      const label = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Preparing…';
+      try {
+        const { text, studentCount } = await I.buildLessonCorpus(ctx, reportInteraction);
+        if (!studentCount) { alert('No reports to export for this assignment yet.'); return; }
+        downloadText(`${reportInteraction}-reports.md`, text);
+      } catch (e) {
+        alert('Could not build the export: ' + (e?.message || e));
+      } finally {
+        btn.disabled = false; btn.textContent = label;
+      }
+    }
+  </script>
+</body>
+</html>

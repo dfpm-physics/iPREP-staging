@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js 'sha256-O1yQJpi2tk+FUEfwpxi0rUB9mwFk14n/BCfN/1plBv8=' 'sha256-csV8Qd4R5XKny04EqxnEP+lJpjl3jjE75szQqfKurCs='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://wkibeptktbnaddfynrwr.supabase.co https://dfpm-physics.github.io; connect-src 'self' https://wkibeptktbnaddfynrwr.supabase.co wss://wkibeptktbnaddfynrwr.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Account · PREP</title>
+  <script>(function(){try{var s=localStorage.getItem('cp.theme');var m=s||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(m==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <link rel="stylesheet" href="../css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O" crossorigin="anonymous"></script>
+  <script src="../js/config.js"></script>
+</head>
+<body>
+  <header id="topnav"></header><script src="../js/nav-shell.js"></script>
+  <main class="page" id="main">
+    <div class="center-load"><span class="spinner"></span><span>Loading account…</span></div>
+  </main>
+
+  <!-- Twin of faculty/account.html. Both are shells: everything lives in js/account.js so the
+       two cannot drift. See the note at the top of that module. -->
+  <script type="module">
+    import { bootstrap } from '../js/auth.js';
+    import { renderNav } from '../js/nav.js';
+    import { initTheme } from '../js/theme.js';
+    import { runPage } from '../js/util.js';
+    import { renderAccount } from '../js/account.js';
+
+    const ctx = await bootstrap({ require: 'student' });
+
+    // runPage, not a bare call: it routes any throw to showFatal instead of leaving the
+    // loading spinner up, which is the only symptom an unguarded failure produces here.
+    runPage(ctx, () => {
+      initTheme();
+      renderNav(ctx, { active: 'account' });
+      return renderAccount(ctx, document.getElementById('main'));
+    });
+  </script>
+</body>
+</html>

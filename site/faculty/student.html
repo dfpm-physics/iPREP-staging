@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js 'sha256-O1yQJpi2tk+FUEfwpxi0rUB9mwFk14n/BCfN/1plBv8=' 'sha256-QN8wUirbqAI38bWkwip9Pa3SDn6zSSBU/WWgPCifn7E='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://wkibeptktbnaddfynrwr.supabase.co https://dfpm-physics.github.io; connect-src 'self' https://wkibeptktbnaddfynrwr.supabase.co wss://wkibeptktbnaddfynrwr.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student · PREP</title>
+  <script>(function(){try{var s=localStorage.getItem('cp.theme');var m=s||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(m==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <link rel="stylesheet" href="../css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O" crossorigin="anonymous"></script>
+  <script src="../js/config.js"></script>
+</head>
+<body>
+  <header id="topnav"></header><script src="../js/nav-shell.js"></script>
+  <main class="page-wide" id="main">
+    <div class="center-load"><span class="spinner"></span><span>Loading…</span></div>
+  </main>
+
+  <div class="modal-backdrop" id="ei-modal">
+    <div class="modal" style="max-width:520px">
+      <div class="modal-head"><h2 id="ei-title">Log extra instruction</h2><button class="modal-close" data-close>×</button></div>
+      <div id="ei-who" class="muted" style="font-size:.86em;margin-bottom:14px"></div>
+      <div class="row wrap" style="gap:12px">
+        <div class="field grow"><label for="ei-when">Date and time</label>
+          <input id="ei-when" type="datetime-local">
+          <div class="field-hint">Your local time. Stored in UTC.</div></div>
+        <div class="field" style="min-width:140px"><label for="ei-dur">Minutes</label>
+          <input id="ei-dur" type="number" min="1" max="480" step="5" value="30"></div>
+      </div>
+      <div class="field"><label for="ei-notes">Notes <span class="muted">(optional)</span></label>
+        <textarea id="ei-notes" rows="3" placeholder="What you covered, what to follow up on…"></textarea>
+        <div class="field-hint">Staff only — students cannot see their EI log or these notes.</div></div>
+      <div class="error-msg" id="ei-error" style="min-height:1em"></div>
+      <div class="row" style="gap:10px">
+        <button class="btn btn-primary" id="ei-save">Log session</button>
+        <button class="btn btn-secondary" data-close>Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Grade ONE submission, without leaving the cadet. See openGrade() for why this exists as
+       well as the Grade page rather than instead of it. -->
+  <div class="modal-backdrop" id="sg-modal">
+    <div class="modal modal-wide">
+      <div class="modal-head">
+        <h2 id="sg-title">Grade</h2>
+        <button class="modal-close" data-close>×</button>
+      </div>
+      <div id="sg-body"><div class="center-load"><span class="spinner"></span><span>Loading…</span></div></div>
+      <div class="error-msg" id="sg-error" style="min-height:1em"></div>
+      <div class="row wrap" style="gap:10px;margin-top:8px;align-items:center" id="sg-actions" hidden>
+        <button class="btn btn-primary" id="sg-save">Save draft</button>
+        <button class="btn btn-secondary" id="sg-finalize">Finalize &amp; publish</button>
+        <span id="sg-status" class="muted" style="font-size:0.85em"></span>
+        <span class="grow"></span>
+        <button class="btn btn-ghost btn-sm" data-close>Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Grant / edit an extension from inside the grading modal. Its own dialog, matching
+       grade.html's, because a reason is required (migration 007) and the field must be cleared
+       and re-validated per open. -->
+  <div class="modal-backdrop" id="sx-modal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-head"><h2 id="sx-heading">Grant extension</h2><button class="modal-close" data-close>×</button></div>
+      <p class="muted" style="font-size:0.88em;margin-bottom:14px" id="sx-name"></p>
+      <div class="field"><label for="sx-due">New due date &amp; time</label>
+        <input type="datetime-local" id="sx-due"></div>
+      <div class="field"><label for="sx-reason">Reason <span class="req">required</span></label>
+        <input type="text" id="sx-reason" maxlength="200"
+               placeholder="e.g. Cadet was on a scheduled team trip.">
+        <div class="field-hint">Your course director sees this alongside a count of the extensions you have granted.</div>
+      </div>
+      <div class="error-msg" id="sx-error" style="min-height:1em"></div>
+      <div class="row" style="gap:10px;margin-top:8px">
+        <button class="btn btn-primary" id="sx-save">Save extension</button>
+        <button class="btn btn-secondary" data-close>Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { bootstrap } from '../js/auth.js';
+    import { renderNav } from '../js/nav.js';
+    import { initTheme } from '../js/theme.js';
+    import { runPage, esc, lastFirst, fmtDate, fmtDateTime, wireModalDismiss } from '../js/util.js';
+    import * as S from '../js/faculty-student.js';
+    import * as EI from '../js/faculty-ei.js';
+    import * as G from '../js/faculty-grade.js';
+    import { questionsOf, submissionLateness, lateBy, effortSignal } from '../js/schema.js';
+    import {
+      CREDIT_LABEL, applyCredit, creditControl, creditControlNode, dirtyCount, WARN_HINT,
+      applyPoints, pointsControl, pointsControlNode, pointsLabel, pointsStatus,
+    } from '../js/grade-controls.js';
+    import { CELL, zoneIndex } from '../js/faculty-gradebook.js';
+    import { percentShown } from '../js/percent-shown.js';
+
+    const ctx = await bootstrap({ require: 'faculty' });
+    runPage(ctx, init);
+
+    const params = new URLSearchParams(location.search);
+    const enrollmentId = params.get('e');
+    // Captured at load: navigating within the page (opening a modal) does not change
+    // document.referrer, but a later render must not re-read a value that has gone stale.
+    const back = S.backTarget(document.referrer);
+
+    let vm = null, rows = [], totals = null, editingId = null;
+
+    async function init() {
+      initTheme();
+      renderNav(ctx, { active: '' });
+      wireEiModal();
+      wireGradeModal();
+      await load();
+    }
+
+    // Returns true when the page was read and drawn. `saved` is the sentence for a change that was just written:
+    // if the re-read then fails, the page says the change WAS saved and that the read failed, never only the failure.
+    async function load(saved = null) {
+      const root = document.getElementById('main');
+      root.innerHTML = `<div class="center-load"><span class="spinner"></span><span>Loading…</span></div>`;
+
+      const res = await S.loadStudentDetail(ctx, enrollmentId);
+      if (res.noCourse)   return fail('No course access.', saved);
+      if (res.notFound)   return fail('That student is not in any section you can see.', saved);
+      if (res.otherCourse) return fail('That student is enrolled in a different course. Switch course from the user menu.', saved);
+      if (res.error)      return fail('Could not load: ' + res.error.message, saved);
+
+      vm = res;
+      rows = S.lessonRows(res);
+      totals = S.studentTotal(res.dbTotal);
+      render();
+      return true;
+    }
+
+    function fail(msg, saved = null) {
+      document.getElementById('main').innerHTML =
+        `<div class="page-head"><h1>Student</h1></div>
+         ${saved ? `<div class="alert alert-success">${esc(saved)} Your change was saved.</div>` : ''}
+         <div class="alert alert-${saved ? 'error' : 'warn'}">${esc(msg)}${saved ? ' The page could not be read back, so nothing below is shown. Reload to see the saved change.' : ''}</div>
+         <a class="btn btn-secondary btn-sm" href="${esc(back)}">← Back</a>
+         ${saved ? ' <button id="reload-btn" class="btn btn-primary btn-sm" type="button">Reload</button>' : ''}`;
+      document.getElementById('reload-btn')?.addEventListener('click', () => location.reload());
+      return false;
+    }
+
+    /* ── render ────────────────────────────────────────────────────────── */
+    function render() {
+      const st = vm.student, en = vm.enrollment;
+      document.title = `${st.name || en.studentId} · PREP`;
+
+      document.getElementById('main').innerHTML = `
+        <div class="sd-head">
+          <div class="grow">
+            <div class="sd-back"><a href="${esc(back)}">← Back</a></div>
+            <div class="page-head" style="margin-bottom:6px"><h1>${esc(st.name || String(en.studentId))}</h1></div>
+            <div class="sd-meta">
+              <span>${esc(String(en.studentId))}</span>
+              <span>Section <strong>${esc(en.sectionCode)}</strong></span>
+              ${st.squadron ? `<span>CS ${esc(st.squadron)}</span>` : ''}
+              ${st.email ? `<span>${esc(st.email)}</span>` : '<span title="No address on file — predates the registrar import.">no email on file</span>'}
+              ${st.auth_user_id ? '' : '<span class="tag gold">no sign-in yet</span>'}
+              ${en.status !== 'active' ? `<span class="tag danger">${esc(en.status)}</span>` : ''}
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" id="ei-add">＋ Log extra instruction</button>
+        </div>
+
+        <div class="stat-grid" style="margin-bottom:20px">
+          ${totalTile()}
+          ${statTile('Counted as 0', String(rows.filter(r => r.cell.state === CELL.MISSING).length),
+                     'missing; in the total as 0', 'red')}
+          ${statTile('Awaiting a score', String(rows.filter(r => r.cell.state === CELL.UNGRADED).length),
+                     'work in or not entered; not in the total', 'amber')}
+          ${statTile('Drafted, not published', String(rows.filter(r => r.cell.state === CELL.DRAFT || r.cell.state === CELL.HELD).length),
+                     'a score exists; not in the total yet', 'blue')}
+        </div>
+
+        ${lessonTable()}
+        ${misconceptionCard()}
+        ${eiCard()}
+        ${commentCardHTML()}`;
+
+      document.getElementById('ei-add').addEventListener('click', () => openEi(null));
+      document.querySelectorAll('[data-grade]').forEach(b =>
+        b.addEventListener('click', () => openGrade(b.dataset.grade)));
+      document.querySelectorAll('[data-ei-edit]').forEach(b =>
+        b.addEventListener('click', () => openEi(b.dataset.eiEdit)));
+      document.querySelectorAll('[data-ei-del]').forEach(b =>
+        b.addEventListener('click', () => removeEi(b.dataset.eiDel)));
+      document.getElementById('sd-copy')?.addEventListener('click', copyComment);
+      document.getElementById('sd-comment-text')?.addEventListener('input', e => {
+        e.target.dataset.touched = '1';
+      });
+    }
+
+    function statTile(label, num, sub, accent) {
+      return `<div class="stat-tile accent-${accent}"><div class="stat-body">
+        <div class="stat-num">${esc(num)}</div>
+        <div class="stat-label">${esc(label)}</div>
+        <div class="stat-sub">${esc(sub)}</div></div></div>`;
+    }
+
+    // The total is the database's own text (course_totals): never rounded here, so 89.99 reads 89.99.
+    function totalTile() {
+      if (!totals) return statTile('Points to date', '—', 'the total could not be read', 'red');
+      if (totals.percentText == null) {
+        return statTile('Points to date', totals.bonusOnly ? `${totals.earnedText} pts` : '—',
+                        totals.bonusOnly ? 'bonus only; nothing else counts yet' : 'nothing counts yet', 'blue');
+      }
+      const more = [totals.letter, totals.rank != null ? `rank ${totals.rank}` : ''].filter(Boolean).join(' · ');
+      return statTile('Points to date', `${percentShown(totals.percentText)}%`,
+                      `${totals.earnedText} of ${totals.possibleText}${more ? ' · ' + more : ''}`, 'blue');
+    }
+
+    function lessonTable() {
+      if (!rows.length) return `<div class="card"><div class="empty-state"><div class="es-ic">📚</div>
+        <h3>No published assignments</h3><p>Nothing has been scheduled in this course yet.</p></div></div>`;
+
+      const body = rows.map(r => `<tr>
+        <td class="sd-code" title="${esc(r.title)}">${esc(r.code)}</td>
+        <td>${esc(r.title)}
+          ${r.late ? `<span class="tag-late" style="margin-left:6px">⏰ ${esc(r.lateLabel)}</span>` : ''}
+          ${r.extended ? '<span class="ext-chip" style="margin-left:6px">extended</span>' : ''}
+          ${work(r)}</td>
+        <td class="sd-num muted" style="font-size:.8em">${r.due ? esc(fmtDate(new Date(r.due))) : '—'}</td>
+        <td class="sd-num">${statusChip(r)}</td>
+        <td class="sd-num">${pointsCell(r.cell)}</td>
+        <td class="sd-num">${dial(r.effort, 'Engagement, 0–5. A measurement, not a grade.')}</td>
+        <td class="sd-num">${dial(r.understanding, 'Demonstrated understanding, 0–5. A measurement, not a grade.')}</td>
+        <td class="sd-num"><button class="btn btn-ghost btn-sm" data-grade="${esc(r.offeringId)}"
+              title="Open this cadet's submission for grading">Grade</button></td>
+      </tr>`).join('');
+
+      return `<div class="card"><div class="card-title">Assignments</div>
+        <div class="card-meta">Points are the grade. The two 0–5 columns are diagnostics — they are never added to the total.</div>
+        <div class="table-wrap"><table class="sd-lessons">
+          <thead><tr><th></th><th>Assignment</th><th>Due</th><th>Status</th><th>Points</th>
+            <th title="Engagement, 0–5">Effort</th><th title="Demonstrated understanding, 0–5">Underst.</th>
+            <th></th></tr></thead>
+          <tbody>${body}</tbody></table></div></div>`;
+    }
+
+    // A 0–5 dial, coloured on the same rollup ramp the gradebook cells use, so a level reads the
+    // same colour on the grid and here. A left rail rather than a fill: the exact number is right
+    // there, so the colour is reinforcement, not the only cue.
+    function dial(v, title) {
+      if (v == null) return '<span class="muted">—</span>';
+      const idx = zoneIndex(v);
+      const style = idx == null ? '' : ` style="border-left-color:var(--s${idx + 1})"`;
+      return `<span class="sd-dial"${style} title="${esc(title)}">${v}/5</span>`;
+    }
+
+    function pointsCell(c) {
+      if (c.state === CELL.EXCUSED) return '<span class="muted" title="Excused; leaves the total">EX</span>';
+      if (c.points == null) return '<span class="muted">—</span>';
+      const frac = `${c.points}<span class="muted">/${c.possible}</span>`;
+      return c.state === CELL.DRAFT || c.state === CELL.HELD ? `<span class="muted" title="Not in the total yet">${frac}</span>` : frac;
+    }
+
+    function statusChip(r) {
+      switch (r.cell.state) {
+        case CELL.GRADED:   return '<span class="score-badge full">graded</span>';
+        case CELL.DRAFT:    return '<span class="tag-ai" title="A score is drafted and not published, so it is not in the total">drafted, not published</span>';
+        case CELL.HELD:     return '<span class="score-badge pending" title="Published, held until its release date">held</span>';
+        case CELL.EXCUSED:  return '<span class="score-badge pending">excused</span>';
+        case CELL.UNGRADED: return '<span class="score-badge pending">ungraded</span>';
+        case CELL.MISSING:  return '<span class="score-badge zero">missing</span>';
+        default:            return '<span class="muted" style="font-size:.8em">not due</span>';
+      }
+    }
+
+    // Q1 is zero-point and stays hidden here exactly as it does on the Grade tab
+    // (grade.html:207,215; CORE.md §2). visibleQuestions() is the filter.
+    function work(r) {
+      const qs = S.visibleQuestions(r.writtenQuestions);
+      const answers = r.writtenAnswers || {};
+      const hasWritten = qs.some(q => answers[q.id]);
+      if (!hasWritten && !r.reportMarkdown) return '';
+      const qa = qs.filter(q => answers[q.id]).map(q => `<div class="sd-qa">
+          <div class="sd-q">${esc(q.prompt || q.text || q.id)}</div>
+          <div class="sd-a">${esc(String(answers[q.id]))}</div></div>`).join('');
+      return `<details class="sd-work"><summary>Show work</summary>${qa}
+        ${r.reportMarkdown ? `<div class="sd-qa"><div class="sd-q">Interactive assignment report</div>
+          <div class="sd-a">${esc(r.reportMarkdown.slice(0, 4000))}</div></div>` : ''}</details>`;
+    }
+
+    function misconceptionCard() {
+      const mc = S.foldMisconceptions(rows);
+      if (!mc.length) return '';
+      return `<div class="card"><div class="card-title">Sticking points across the term</div>
+        <div class="card-meta">Folded from every graded assignment. Repeats first — a misconception seen three times is the conversation.</div>
+        <div class="sd-mc">${mc.map(m => `<div class="sd-mc-row">
+          <div class="sd-mc-n">${m.count}×</div>
+          <div class="sd-mc-body"><strong>${esc(m.description || m.id)}</strong>
+            <div class="sd-mc-where">${esc(m.lessons.map(l => l.code).join(' · '))}</div></div>
+        </div>`).join('')}</div></div>`;
+    }
+
+    function eiCard() {
+      const sum = EI.summarizeEi(vm.ei);
+      const list = vm.ei.length ? vm.ei.map(s => `<div class="sd-ei-row">
+          <span class="sd-ei-when">${esc(fmtDateTime(new Date(s.started_at)))}</span>
+          <span>${esc(EI.fmtDuration(s.duration_minutes))}</span>
+          <span class="sd-ei-note">${esc(s.notes || '')}
+            ${s.batch_id ? '<span class="sd-ei-batch">· group session</span>' : ''}</span>
+          <span class="muted" style="font-size:.78em">${esc(s.instructors?.name || '')}</span>
+          <button class="btn btn-ghost btn-sm" data-ei-edit="${esc(s.id)}">Edit</button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--red)" data-ei-del="${esc(s.id)}">Delete</button>
+        </div>`).join('')
+        : `<div class="muted" style="font-size:.88em">No sessions logged.</div>`;
+
+      return `<div class="card"><div class="card-title">Extra instruction</div>
+        <div class="card-meta">${sum.total} session(s) · ${EI.fmtDuration(sum.totalMinutes)} total.
+          Staff only — this cadet cannot see any of it.</div>
+        ${vm.eiError ? `<div class="alert alert-warn">Could not load EI: ${esc(vm.eiError.message)}</div>` : list}</div>`;
+    }
+
+    function buildComment() {
+      return S.commentCard({
+        student: vm.student, enrollment: vm.enrollment, totals, rows, ei: vm.ei,
+        freeText: '',
+      });
+    }
+
+    function commentCardHTML() {
+      return `<div class="card sd-comment"><div class="card-title">Advising note</div>
+        <div class="card-meta">Assembled from this page. Edit freely, then copy it into an email — it is plain text on purpose.</div>
+        <textarea id="sd-comment-text" spellcheck="true">${esc(buildComment())}</textarea>
+        <div class="row" style="gap:10px;margin-top:12px">
+          <button class="btn btn-secondary btn-sm" id="sd-copy">Copy to clipboard</button>
+          <span id="sd-copy-status" class="muted" style="font-size:.82em"></span></div></div>`;
+    }
+
+    async function copyComment() {
+      const txt = document.getElementById('sd-comment-text').value;
+      const st = document.getElementById('sd-copy-status');
+      try {
+        await navigator.clipboard.writeText(txt);
+        st.style.color = 'var(--green)'; st.textContent = '✓ Copied';
+      } catch {
+        // clipboard is origin- and gesture-gated and fails on plain http; select the text so the
+        // operator can still Ctrl+C rather than being told "copy failed" with no way forward.
+        document.getElementById('sd-comment-text').select();
+        st.style.color = 'var(--muted)'; st.textContent = 'Selected — press Ctrl+C';
+      }
+      setTimeout(() => { st.textContent = ''; }, 3000);
+    }
+
+    /* ── EI ────────────────────────────────────────────────────────────── */
+    function wireEiModal() {
+      const m = document.getElementById('ei-modal');
+      wireModalDismiss(m, () => m.classList.remove('open'));
+      document.getElementById('ei-save').addEventListener('click', saveEi);
+    }
+
+    function openEi(id) {
+      editingId = id || null;
+      const row = id ? vm.ei.find(s => s.id === id) : null;
+      document.getElementById('ei-title').textContent = row ? 'Edit session' : 'Log extra instruction';
+      document.getElementById('ei-who').innerHTML = `<strong>${esc(vm.student.name || '')}</strong> · ${esc(vm.enrollment.sectionCode)}`;
+      document.getElementById('ei-when').value = row ? EI.fromUtcISO(row.started_at) : EI.localInputValue(new Date());
+      document.getElementById('ei-dur').value = row ? row.duration_minutes : EI.DEFAULT_DURATION;
+      document.getElementById('ei-notes').value = row?.notes || '';
+      document.getElementById('ei-error').textContent = '';
+      document.getElementById('ei-save').textContent = row ? 'Save changes' : 'Log session';
+      document.getElementById('ei-modal').classList.add('open');
+      document.getElementById('ei-when').focus();
+    }
+
+    async function saveEi() {
+      const err = document.getElementById('ei-error');
+      const btn = document.getElementById('ei-save');
+      const payload = {
+        enrollmentIds: [vm.enrollment.enrollmentId],
+        instructorId: ctx.instructorRow?.id || null,
+        startedAt: document.getElementById('ei-when').value,
+        durationMinutes: document.getElementById('ei-dur').value,
+        notes: document.getElementById('ei-notes').value,
+      };
+      const problem = EI.validateEi(payload);
+      if (problem) { err.textContent = problem; return; }
+
+      btn.disabled = true;
+      const label = btn.textContent;
+      btn.innerHTML = '<span class="spinner on-dark"></span> Saving…';
+
+      let error = null;
+      if (editingId) {
+        const [row] = EI.eiRows(payload);
+        // instructor_id is NOT patched — an edit corrects the record of a session, it does not
+        // reassign who held it. Changing that silently would rewrite attribution on a typo fix.
+        ({ error } = await EI.updateEi(editingId, {
+          started_at: row.started_at, duration_minutes: row.duration_minutes, notes: row.notes,
+        }));
+      } else {
+        const res = await EI.logEi(EI.eiRows(payload));
+        error = res.failed[0]?.error || null;
+      }
+
+      btn.disabled = false; btn.textContent = label;
+      if (error) { err.textContent = 'Save failed: ' + error.message; return; }
+      document.getElementById('ei-modal').classList.remove('open');
+      await load('Extra instruction saved.');
+    }
+
+    async function removeEi(id) {
+      if (!confirm('Delete this EI session? This cannot be undone.')) return;
+      const { error } = await EI.deleteEi(id);
+      if (error) { alert('Could not delete: ' + error.message); return; }
+      await load('Session deleted.');
+    }
+
+    /* ═══════════════════ Grade one submission, in a modal ═══════════════════
+     * DIRECTOR'S REQUEST, 2026-07-30: "in the individual student view it should be possible to
+     * open a single student's submission for grading like in the grading page… re-open, change
+     * grades, enter comments, grant extensions."
+     *
+     * WHY THIS EXISTS AS WELL AS grade.html, NOT INSTEAD OF IT
+     *   The two answer different questions and both are real. The Grade page is a production line:
+     *   one assignment, a whole section, work through it. This page is the one screen that asks
+     *   "what is going on with THIS cadet" — and the thing you most often want to DO having found
+     *   an answer here is fix the grade you are looking at. Sending the reader to grade.html for
+     *   that meant re-picking the assignment, re-picking the section, and then finding the one
+     *   name among eighteen — landing them on the production line to make a single repair.
+     *
+     * WHAT IS SHARED, AND WHAT IS NOT
+     *   Every WRITE goes through faculty-grade.js — the same saveScores / finalizeScores /
+     *   reopenScore / setExtension the Grade page calls, with the same two rules in gradeRows()
+     *   that stop a save inventing a grade or relabelling AI work. The 3-state control is
+     *   grade-controls.js. What is local is the layout, because a modal about one submission is
+     *   not a page about a section.
+     *
+     * SCOPE. loadGradingData() is called with this cadet's section, then narrowed to them. It
+     *   fetches a section's worth of rows to grade one, which is a real cost and a deliberate one:
+     *   it is the function whose behaviour is already proven, and a second narrower loader would
+     *   be a second place for the effort-taker exclusion and the extension filter to be got wrong.
+     *   A section is ~20 students.
+     */
+    let sgOffering = null, sgStudent = null, sgGradeData = {}, sgGradeMap = {},
+        sgExtension = null, sgSubmission = null, sgResponses = {}, sgQuestions = [],
+        // The non-written model, or null when this cadet is on the written card. Exactly one of
+        // sgGradeData / sgEffort is populated — see buildGradeData()'s header on why a student in
+        // both would be written twice by one Save.
+        sgEffort = null;
+
+    function sgClose() { document.getElementById('sg-modal').classList.remove('open'); }
+
+    function wireGradeModal() {
+      const m = document.getElementById('sg-modal');
+      // attemptClose, not a bare close: this dialog holds unsaved grades and asks first.
+      wireModalDismiss(m, attemptClose);
+      // Delegated on the modal body, which is replaced on every open and every re-render.
+      document.getElementById('sg-body').addEventListener('click', onGradeClick);
+      document.getElementById('sg-body').addEventListener('input', (e) => {
+        const t = e.target.closest('textarea[data-act="feedback"], textarea[data-act="note"]');
+        if (!t) return;
+        if (t.dataset.act === 'note') {
+          if (sgEffort) { sgEffort.note = t.value; sgEffort.modified = true; sgSyncDirty(); }
+          return;
+        }
+        const gd = sgGradeData[t.dataset.qid];
+        if (gd) { gd.feedback = t.value; gd.modified = true; sgSyncDirty(); }
+      });
+      document.getElementById('sg-save').addEventListener('click', () => sgWrite(false));
+      document.getElementById('sg-finalize').addEventListener('click', () => sgWrite(true));
+      wireExtModal();
+    }
+
+    /** Closing discards whatever has not been written, so it asks first. */
+    function attemptClose() {
+      const n = sgDirty();
+      if (n && !confirm(`You have ${n} unsaved change${n === 1 ? '' : 's'}.\n\n`
+                      + `Closing discards them. Continue?`)) return;
+      sgClose();
+    }
+
+    async function openGrade(offeringId) {
+      const m = document.getElementById('sg-modal');
+      const row = rows.find(r => r.offeringId === offeringId);
+      document.getElementById('sg-title').textContent =
+        `${row?.title || 'Grade'} — ${vm.student.name || vm.enrollment.studentId}`;
+      document.getElementById('sg-body').innerHTML =
+        `<div class="center-load"><span class="spinner"></span><span>Loading…</span></div>`;
+      document.getElementById('sg-error').textContent = '';
+      document.getElementById('sg-actions').hidden = true;
+      m.classList.add('open');
+
+      const data = await G.loadGradingData(ctx, offeringId, [vm.enrollment.sectionId]);
+      if (!data.offering) {
+        document.getElementById('sg-body').innerHTML =
+          `<div class="alert alert-error">${data.refusal ? esc(data.refusal.message) : 'That assignment could not be loaded.'}</div>`;
+        return;
+      }
+      const sid = vm.enrollment.studentId;
+      const student = data.students.find(s => s.student_id === sid);
+      if (!student) {
+        // RLS returned the offering but not this enrollment — the honest answer is that they are
+        // not gradeable by this caller, not an empty form.
+        document.getElementById('sg-body').innerHTML =
+          `<div class="alert alert-warn">This cadet is not in a section you can grade.</div>`;
+        return;
+      }
+
+      sgOffering = data.offering;
+      sgStudent = student;
+      sgGradeMap = data.gradeMap;
+      sgExtension = data.extensionMap[sid] || null;
+      sgSubmission = data.submissionMap[sid] || null;
+      sgResponses = data.responseMap[sid] || {};
+      sgQuestions = questionsOf(sgOffering.written);
+      // Both models, from the same two builders the Grade page uses — so this screen cannot decide
+      // a cadet is on a different path than that one does. Exactly one comes back populated.
+      const one = { [sid]: sgResponses };
+      const subs = { [sid]: sgSubmission };
+      sgGradeData = G.buildGradeData(sgOffering, [student], one, sgGradeMap, subs)[sid] || {};
+      sgEffort = G.buildEffortData(sgOffering, [student], sgGradeMap, subs, one)[sid] || null;
+      renderGradeModal();
+    }
+
+    /** The pending total, or null when nothing has been graded at all. */
+    function sgTotal() {
+      if (sgEffort) return sgEffort.points;
+      return sgQuestions.reduce((s, q) => s + (Number(sgGradeData[q.id]?.score) || 0), 0);
+    }
+
+    const sgTotalText = () => {
+      const t = sgTotal();
+      return `${t == null ? '—' : Number(t).toFixed(2)} / ${Number(sgOffering.pointsPossible ?? 0).toFixed(2)} pts`;
+    };
+
+    function renderGradeModal() {
+      const sid = sgStudent.student_id;
+      const prior = sgGradeMap[sid];
+      const finalized = !!prior?.finalized;
+      const maxTotal = Number(sgOffering.pointsPossible ?? 0);
+      const late = submissionLateness(sgOffering, sgStudent.section_id,
+                                      sgExtension?.due || null, sgSubmission?.committedAt);
+
+      const chips = `
+        ${finalized ? `<span class="tag" style="background:var(--alert-ok-bg);color:var(--alert-ok-fg)">✅ Finalized</span>
+          <button class="btn btn-ghost btn-sm" data-act="reopen">Reopen</button>` : ''}
+        ${!prior ? `<span class="tag tag-ungraded">Not yet graded</span>`
+          : prior.source === 'ai_suggested' ? `<span class="tag tag-ai">AI suggested</span>` : ''}
+        ${late.late ? `<span class="tag tag-late" title="Submitted ${esc(fmtDateTime(late.at))} · due ${esc(fmtDateTime(late.due))}">⏰ ${esc(lateBy(late.ms))}</span>` : ''}
+        ${sgExtension ? `<span class="ext-chip" title="${esc(sgExtension.reason)}">📅 ${esc(fmtDate(sgExtension.due))}</span>
+          <button class="btn btn-ghost btn-sm" data-act="ext">Edit</button>
+          <button class="btn btn-ghost btn-sm" data-act="ext-remove">Remove</button>`
+          : `<button class="btn btn-ghost btn-sm" data-act="ext">Grant extension</button>`}
+        <span class="grow"></span>
+        <span class="gc-total" id="sg-total">${esc(sgTotalText())}</span>`;
+
+      /* The non-written card, identical in behaviour to the Grade page's — same shared control,
+         same write path. It used to be an alert saying the grade came from the lesson report and
+         that Reopen was the only thing available here, which was true and was the whole problem:
+         grade.html pointed the reader AT this screen to "adjust one", and this screen's Save and
+         Finalize were disabled for exactly the cadets it sent. */
+      const body = sgEffort
+        ? (() => {
+            const { effort, source } = effortSignal(prior || null, null);
+            const measured = effort == null ? '' :
+              ` · effort <b>${effort}/5</b> <span class="muted">(${source === 'grade' ? 'graded' : 'measured by the lesson'})</span>`;
+            const control = finalized
+              ? `<span class="credit-toggle ${pointsStatus(sgEffort.points, maxTotal)}" disabled>${esc(pointsLabel(sgEffort.points, maxTotal))}</span>`
+              : pointsControl(sid, sgEffort, maxTotal, 'sgpts');
+            const note = finalized
+              ? (sgEffort.note ? `<div class="feedback-block" style="margin-top:8px">${esc(sgEffort.note)}</div>` : '')
+              : `<textarea class="feedback-input" data-act="note"
+                    placeholder="Why this score — shown to the cadet (required to withhold credit)…">${esc(sgEffort.note)}</textarea>`;
+            return `<div class="gc-body gc-effort" style="padding:0">
+              <div class="grade-q" data-effort>
+                <div class="gq-head"><span class="gq-label">${sgEffort.kind === 'interactive' ? 'Interactive lesson' : 'No submission'}</span>${control}</div>
+                ${sgEffort.kind === 'interactive'
+                  ? `<div class="gq-text">Graded from the interactive lesson report${measured}. The report itself is on this page, above.</div>`
+                  : `<div class="grade-answer empty">No submission on any graded path.</div>`}
+                ${note}
+                ${finalized ? `<div class="warn-hint" style="color:var(--muted)">This grade is published,
+                   so the score is locked. Use <b>Reopen</b> above to change it.</div>` : ''}
+              </div>
+            </div>`;
+          })()
+        : sgQuestions.filter(q => Number(q.points) !== 0).map(q => {
+            const idx = sgQuestions.indexOf(q);
+            const ans = sgResponses[q.id] ?? '';
+            const hasAns = String(ans).trim().length > 0;
+            const gd = sgGradeData[q.id];
+            if (!gd) return '';
+            const fig = q.figure_url ? `<div style="margin:6px 0 10px;text-align:center"><img src="${esc(q.figure_url)}" alt="Question figure"
+              style="max-width:100%;max-height:220px;border-radius:6px;border:1px solid var(--border)"></div>` : '';
+            const control = finalized
+              ? `<span class="credit-toggle ${gd.status}" disabled>${CREDIT_LABEL[gd.status]}</span>`
+              : creditControl(sid, q, gd, 'sgtg');
+            const feedback = finalized
+              ? (gd.feedback ? `<div class="feedback-block" style="margin-top:8px">${esc(gd.feedback)}</div>` : '')
+              : `<textarea class="feedback-input" data-act="feedback" data-qid="${esc(q.id)}"
+                    placeholder="Feedback for student (optional)…">${esc(gd.feedback)}</textarea>`;
+            const hint = (gd.status === 'warn' && !finalized)
+              ? `<div class="warn-hint" data-hint>${WARN_HINT}</div>` : '';
+            return `<div class="grade-q" data-status="${gd.status}" id="sgrow-${esc(q.id)}">
+              <div class="gq-head"><span class="gq-label">Q${idx + 1} · ${q.points} pts</span>${control}</div>
+              <div class="gq-text">${esc(q.text)}</div>${fig}
+              <div class="grade-answer ${hasAns ? '' : 'empty'}">${hasAns ? esc(String(ans)) : 'No answer submitted.'}</div>
+              ${feedback}${hint}
+            </div>`;
+          }).join('');
+
+      document.getElementById('sg-body').innerHTML = `
+        <div class="gc-head" style="margin-bottom:12px">
+          <span class="tag">Sec ${esc(ctx.sectionCodeOf(sgStudent.section_id))}</span>${chips}
+        </div>
+        <div class="sg-scroll">${body || '<div class="muted">This assignment has no gradable questions.</div>'}</div>
+        <div class="alert alert-warn" id="sg-dirty" hidden style="margin-top:12px"></div>`;
+
+      // Finalized work is read-only until it is reopened, so the write buttons would only ever
+      // produce a no-op or an argument with the DB. Reopen is on the header row above.
+      document.getElementById('sg-actions').hidden = false;
+      document.getElementById('sg-save').disabled = finalized;
+      document.getElementById('sg-finalize').disabled = finalized;
+      sgSyncDirty();
+    }
+
+    /** Both models, one count. `x:` wraps the per-question map so dirtyCount sees the nested shape. */
+    const sgDirty = () => dirtyCount({ x: sgGradeData }) + (sgEffort?.modified ? 1 : 0);
+
+    function sgSyncDirty() {
+      const el = document.getElementById('sg-dirty');
+      if (!el) return;
+      const n = sgDirty();
+      el.hidden = n === 0;
+      if (n) el.innerHTML = `<strong>${n} unsaved change${n === 1 ? '' : 's'}.</strong>
+        Nothing reaches the cadet until you Save draft or Finalize &amp; publish.`;
+    }
+
+    function onGradeClick(e) {
+      const el = e.target.closest('[data-act]');
+      if (!el) return;
+      switch (el.dataset.act) {
+        case 'toggle':     sgToggle(el.dataset.qid, Number(el.dataset.pts)); break;
+        case 'points':     sgTogglePoints(); break;
+        case 'reopen':     sgReopen(); break;
+        case 'ext':        openExt(); break;
+        case 'ext-remove': removeExt(); break;
+      }
+    }
+
+    function sgToggle(qid, pts) {
+      const gd = applyCredit(sgGradeData[qid], pts);
+      const row = document.getElementById(`sgrow-${qid}`);
+      if (row) {
+        const old = row.querySelector('.credit-change, .credit-toggle');
+        if (old) old.replaceWith(creditControlNode(sgStudent.student_id, { id: qid, points: pts }, gd, 'sgtg'));
+        row.dataset.status = gd.status;
+        let hint = row.querySelector('[data-hint]');
+        if (gd.status === 'warn' && !hint) {
+          hint = document.createElement('div'); hint.className = 'warn-hint'; hint.dataset.hint = '1';
+          hint.textContent = WARN_HINT;
+          row.appendChild(hint);
+        } else if (gd.status !== 'warn' && hint) hint.remove();
+      }
+      const tot = document.getElementById('sg-total');
+      if (tot) tot.textContent = sgTotalText();
+      sgSyncDirty();
+    }
+
+    /** The same click on the one-number card. */
+    function sgTogglePoints() {
+      if (!sgEffort) return;
+      const pp = Number(sgOffering.pointsPossible ?? 0);
+      applyPoints(sgEffort, pp);
+      const old = document.getElementById('sg-body').querySelector('.credit-change, .credit-toggle');
+      if (old) old.replaceWith(pointsControlNode(sgStudent.student_id, sgEffort, pp, 'sgpts'));
+      const tot = document.getElementById('sg-total');
+      if (tot) tot.textContent = sgTotalText();
+      sgSyncDirty();
+    }
+
+    /**
+     * Save or publish. One student, one row — `writableCount` is not consulted because the answer
+     * is at most one and the operator is looking at the card it would write.
+     */
+    async function sgWrite(finalize) {
+      const st = document.getElementById('sg-status');
+      const sid = sgStudent.student_id;
+      const students = [sgStudent];
+      if (finalize && !confirm(
+        `Publish this grade to ${sgStudent.name}?\n\nThey will see their score and feedback immediately.`)) return;
+      st.textContent = finalize ? 'Publishing…' : 'Saving…';
+      const model = { [sid]: sgGradeData };
+      const effort = sgEffort ? { [sid]: sgEffort } : {};
+      const res = finalize
+        ? await G.finalizeScores(ctx, sgOffering, students, model, sgGradeMap, effort)
+        : await G.saveScores(ctx, sgOffering, students, model, sgGradeMap, effort);
+      if (res.error) { st.textContent = ''; document.getElementById('sg-error').textContent = 'Failed: ' + res.error.message; return; }
+      if (res.skipped) { st.textContent = 'Nothing to save — no grade exists yet and nothing was edited.'; return; }
+      st.textContent = finalize ? '✅ Published' : '✓ Saved draft';
+      // Reload the page behind the modal, then re-open on the same assignment: the lesson table,
+      // the totals and the diagnostics all just changed, and leaving them stale would make the row
+      // behind the modal disagree with the modal on top of it.
+      if (!(await load(finalize ? 'Grade published.' : 'Draft saved.'))) return;
+      await openGrade(sgOffering.offeringId);
+      document.getElementById('sg-status').textContent = finalize ? '✅ Published' : '✓ Saved draft';
+      setTimeout(() => { const s = document.getElementById('sg-status'); if (s) s.textContent = ''; }, 4000);
+    }
+
+    async function sgReopen() {
+      if (!confirm(`Reopen this grade for ${sgStudent.name}? Their score is hidden until you re-finalize.`)) return;
+      const { error } = await G.reopenScore(ctx, sgOffering.offeringId, sgStudent.enrollment_id);
+      if (error) { document.getElementById('sg-error').textContent = 'Could not reopen: ' + error.message; return; }
+      if (!(await load('Grade reopened.'))) return;
+      await openGrade(sgOffering.offeringId);
+    }
+
+    /* ── Extensions, from inside the grading modal ─────────────────────────── */
+    function wireExtModal() {
+      const m = document.getElementById('sx-modal');
+      wireModalDismiss(m, () => m.classList.remove('open'));
+      document.getElementById('sx-save').addEventListener('click', saveExt);
+    }
+
+    function openExt() {
+      document.getElementById('sx-heading').textContent = sgExtension ? 'Edit extension' : 'Grant extension';
+      document.getElementById('sx-name').textContent =
+        `${sgStudent.name} — ${sgOffering.title || sgOffering.slug}`;
+      document.getElementById('sx-error').textContent = '';
+      document.getElementById('sx-reason').value = sgExtension?.reason || '';
+      const existing = sgExtension?.due || sgOffering?.dueAt;
+      const inp = document.getElementById('sx-due');
+      if (existing) {
+        const d = new Date(existing), pad = n => String(n).padStart(2, '0');
+        inp.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      } else inp.value = '';
+      document.getElementById('sx-modal').classList.add('open');
+    }
+
+    async function saveExt() {
+      const val = document.getElementById('sx-due').value;
+      const reason = document.getElementById('sx-reason').value.trim();
+      const err = document.getElementById('sx-error');
+      if (!val) { err.textContent = 'Please select a date and time.'; return; }
+      // Enforced by a NOT NULL + CHECK in migration 007 too; caught here so the operator gets a
+      // sentence instead of a Postgres constraint name.
+      if (!reason) { err.textContent = 'A reason is required — your director sees it on the extensions report.'; return; }
+      const { error, reopened } = await G.setExtension(
+        ctx, sgOffering.offeringId, sgStudent.enrollment_id, new Date(val).toISOString(), reason);
+      if (error) { err.textContent = 'Save failed: ' + error.message; return; }
+      document.getElementById('sx-modal').classList.remove('open');
+      // See the note on grade.html's saveExt — a silent un-publish is the one outcome here that
+      // could surprise the student before it surprises the grader.
+      if (reopened) alert(`Extension granted.\n\n${sgStudent.name} had a published grade, so it ` +
+                          `has been re-opened — otherwise the extension would not have let them ` +
+                          `back in. Their score is hidden until you finalize again.`);
+      if (!(await load('Extension saved.'))) return;
+      await openGrade(sgOffering.offeringId);
+    }
+
+    async function removeExt() {
+      if (!confirm(`Remove the extension for ${sgStudent.name}?\n\nThey revert to the original due date. `
+                 + `This erases the record of it — if you are pulling one back rather than `
+                 + `correcting a mistake, your director should revoke it instead.`)) return;
+      const { error } = await G.removeExtension(sgOffering.offeringId, sgStudent.enrollment_id);
+      if (error) {
+        // The DB refuses this once the student has committed work under the extension.
+        alert(/already submitted under it/i.test(error.message)
+          ? `${sgStudent.name} has already submitted under this extension, so it cannot be removed.\n\n`
+            + `Withdrawing it now would only turn an on-time submission into a late one. Grade the work.`
+          : 'Failed to remove extension: ' + error.message);
+        return;
+      }
+      if (!(await load('Extension removed.'))) return;
+      await openGrade(sgOffering.offeringId);
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-JXbcKTfzopvbHMIJM0pnzXpETGiYLxRo8QiopcKrp0I='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://wkibeptktbnaddfynrwr.supabase.co https://dfpm-physics.github.io; connect-src 'self' https://wkibeptktbnaddfynrwr.supabase.co wss://wkibeptktbnaddfynrwr.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Extensions · PREP</title>
+  <!-- Moved 2026-07-30. The extensions report is the **Extensions tab of Course Admin** now
+       (director's request) — it left the nav bar along with its own page, because a tab on the
+       page a director already opens for staffing and export is found, and a fifth nav entry is
+       the cost P1.9 established the bar cannot keep paying. See nav.js FACULTY_LINKS.
+
+       THIS FILE STAYS AS A REDIRECT rather than being deleted. It was a linked destination for
+       eight days, it is the kind of URL a director bookmarks, and a 404 on a page that still
+       exists under a different name is the worst of the three outcomes. Compare the two roster
+       pages of 2026-07-23, which were deleted outright — those had been reachable for hours and
+       nobody could have bookmarked them.
+
+       Redirect in <head>, before anything else loads: no Supabase client, no auth bootstrap, no
+       nav. There is nothing on this page to authorize, so making it wait for a session would be
+       spending a round trip to show a spinner. `location.replace` rather than `href` so the Back
+       button returns to wherever the reader came from instead of bouncing them here again. -->
+  <script>location.replace('admin.html?tab=extensions' + location.hash);</script>
+  <link rel="canonical" href="admin.html?tab=extensions">
+  <meta http-equiv="refresh" content="0; url=admin.html?tab=extensions">
+</head>
+<body>
+  <p style="font-family:system-ui,sans-serif;padding:2rem">
+    The extensions report has moved into
+    <a href="admin.html?tab=extensions">Course administration &rsaquo; Extensions</a>.
+  </p>
+</body>
+</html>

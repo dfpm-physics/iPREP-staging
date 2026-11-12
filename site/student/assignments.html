@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js 'sha256-MTNnZJZDSsP7vMsQUQDKQ0JgrFascZyU1YSbECS85Q8=' 'sha256-O1yQJpi2tk+FUEfwpxi0rUB9mwFk14n/BCfN/1plBv8='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://wkibeptktbnaddfynrwr.supabase.co https://dfpm-physics.github.io; connect-src 'self' https://wkibeptktbnaddfynrwr.supabase.co wss://wkibeptktbnaddfynrwr.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Written assignment · PREP</title>
+  <script>(function(){try{var s=localStorage.getItem('cp.theme');var m=s||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(m==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <link rel="stylesheet" href="../css/styles.css">
+  <style>
+    .review-answer-box { background: var(--surface-sunken); border: 1px solid var(--border); border-radius: 6px;
+      padding: 12px 14px; font-size: 0.92em; line-height: 1.55; white-space: pre-wrap; margin-bottom: 10px; }
+    .review-score-badge { display: inline-block; padding: 6px 16px; border-radius: 6px; font-size: 0.88em; font-weight: 700; border: 2px solid transparent; }
+    .review-score-badge.full { background: var(--alert-ok-bg);    border-color: var(--alert-ok-bd);    color: var(--alert-ok-fg); }
+    .review-score-badge.warn { background: var(--alert-warn-bg);  border-color: var(--alert-warn-bd);  color: var(--alert-warn-fg); }
+    .review-score-badge.zero { background: var(--alert-error-bg); border-color: var(--alert-error-bd); color: var(--alert-error-fg); }
+    .score-hero { background: linear-gradient(135deg, var(--blue), var(--blue-lt)); color: #fff; border: none; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O" crossorigin="anonymous"></script>
+  <script src="../js/config.js"></script>
+</head>
+<body>
+  <header id="topnav"></header><script src="../js/nav-shell.js"></script>
+  <main class="page" id="main">
+    <div class="center-load"><span class="spinner"></span><span>Loading assignments…</span></div>
+  </main>
+
+  <script type="module">
+    // The written-preflight surface. Reached from a lesson; students navigate by lesson, not
+    // by modality (STUDENT-LESSON-VIEW.md §1).
+    //
+    // THIS PAGE IS A FORM, NOT A LIST. It carried a second assignment list until 2026-08-25 — a
+    // survivor of the pre-unification world, when Assignments and Interactions were two nav
+    // entries. The 2026-07-28 unification gave the nav slot to lessons.html and left this list
+    // orphaned but still reachable, via a Back button that stripped ?a= and re-rendered it. It
+    // showed only assignments whose WRITTEN path is graded, so an iPREP-only lesson was simply
+    // absent from it — and because renderNav() lights the same "Assignments" tab on both pages,
+    // a cadet could not tell the two apart and read the gap as a deleted lesson. (Reported by a
+    // phys-215 cadet about Lesson 07, whose written activity is grading_role='practice'.)
+    // Arriving here without a resolvable ?a= now sends the cadet to lessons.html, which is the
+    // one and only assignment list.
+    //
+    // AGAINST SCHEMA `app`: an assignment's questions live in the WRITTEN ACTIVITY's content,
+    // the student's answers live in submission_activities, and committing is an explicit act
+    // that sets submissions.status='committed' and records which activity carries credit.
+    // Nothing on this page queries a table directly — every read and write goes through
+    // student-data.js, so the choice/lock rules are applied in exactly one place.
+    import { bootstrap } from '../js/auth.js';
+    import { renderNav } from '../js/nav.js';
+    import { initTheme } from '../js/theme.js';
+    import {
+      loadAssignmentStatuses, saveWrittenAnswers, commitSubmission,
+    } from '../js/student-data.js';
+    import { questionsOf, readingLinkOf, displayPoints, isGradedPath } from '../js/schema.js';
+    import { esc, fmtDateTime, runPage, guarded } from '../js/util.js';
+
+    const ctx = await bootstrap({ require: 'student' });
+    runPage(ctx, init);
+
+    let list = [];
+    let current = null;       // the current item from loadAssignmentStatuses()
+    let answers = {};
+    let saveTimer = null;
+
+    async function init() {
+      initTheme();
+      renderNav(ctx, { active: 'lessons', onCourseChange: guarded(() => route()) });
+      await route();
+    }
+
+    /** Fetch the written preflights this student can earn points on, into `list`. */
+    async function loadData() {
+      const root = document.getElementById('main');
+      if (!ctx.currentOffering) {
+        root.innerHTML = `<div class="alert alert-warn">You're not enrolled in a course this term.</div>`;
+        return false;
+      }
+      root.innerHTML = `<div class="center-load"><span class="spinner"></span><span>Loading…</span></div>`;
+      const all = await loadAssignmentStatuses(ctx, { withCells: true });
+      // A written activity that is only PRESENT is not a written preflight — an interaction-only
+      // lesson attaches one as `practice`, and opening one here would put a full question set with
+      // a live Submit button in front of a cadet whose commit the DB was always going to refuse.
+      // This page is "work I can earn points for by writing", so the graded role is the test.
+      list = all.filter(a => isGradedPath(a.written));
+      return true;
+    }
+
+    /**
+     * The only thing this page does is open ONE assignment's question form. Every link that
+     * legitimately arrives here carries ?a=<offeringId> — lessons.html writtenHref(), and those
+     * links only render on a lesson whose written path is graded.
+     *
+     * Anything else is a stale bookmark or a Back button, and it goes to lessons.html rather than
+     * to a list. A miss is not always a mistake: a lesson whose written path was later set to
+     * `practice` drops out of `list`, and the cadet asking for it needs the assignment list that
+     * still has it, not a page that quietly omits it. location.replace() so Back does not bounce
+     * them straight back to the miss.
+     */
+    async function route() {
+      if (!(await loadData())) return;
+      const openId = new URLSearchParams(location.search).get('a');
+      const a = openId ? list.find(x => String(x.offeringId) === String(openId)) : null;
+      if (a) { openAssignment(a); return; }
+      location.replace('lessons.html');
+    }
+
+    /** Back goes to the assignment list, which lives on lessons.html — the label has always said
+     *  "Back to assignments" and now it is true. location.href, not replace: Back from the list
+     *  should return to the assignment the cadet was just looking at. */
+    function backToLessons() {
+      location.href = 'lessons.html';
+    }
+
+    function openAssignment(a) {
+      current = a;
+      const root = document.getElementById('main');
+      const written = a.written;
+      const questions = questionsOf(written);
+
+      // Answers come from the submission we already loaded — no extra round trip. The list
+      // load stitched submissions and grades onto every item.
+      answers = { ...(a.submission?.activities?.[written.id]?.content || {}) };
+
+      const grade = a.grade;
+      const isGraded = a.status === 'graded';
+      const committed = a.submission?.status === 'committed';
+      // Committing locks WHICH PATH counts (switch_policy, enforced by the DB) — it does not
+      // freeze the answers. A student may keep refining written work until the deadline, which
+      // is the behaviour STUDENT-LESSON-VIEW §4 describes (state SUBMITTED, "still editable").
+      // Only the deadline makes this page read-only.
+      const locked = a.isPast;
+
+      const readingLink = readingLinkOf(written);
+      let descHTML = a.description ? `<span>${esc(a.description)}</span>` : '';
+      if (readingLink) descHTML += (descHTML ? '<br>' : '') +
+        `<a href="${esc(readingLink)}" target="_blank" rel="noopener"
+          style="display:inline-flex;gap:6px;margin-top:8px;font-size:0.88em;color:var(--blue-lt);font-weight:600;text-decoration:none">📖 Read before completing ↗</a>`;
+
+      const header = `
+        <button class="btn btn-secondary btn-sm" id="back-btn" style="margin-bottom:20px">← Back to assignments</button>
+        <div class="card">
+          <div class="card-title">${esc(a.title)}</div>
+          <div class="card-meta">${a.due ? 'Due ' + fmtDateTime(a.due) : 'No due date'} · ${a.pointsPossible} pts</div>
+          <div style="font-size:0.9em;color:var(--muted)">${descHTML}</div>
+        </div>`;
+
+      // A CHOICE lesson stays on this list after the student commits to the interactive — the
+      // written path really is graded here, they just did not take it. Their answers remain theirs
+      // to read, but nothing about this page may still look submittable: switch_policy has locked
+      // the choice, so a Submit click could only ever return a raw trigger exception.
+      const chosenElsewhere = !!written && !!a.chosenActivity && a.chosenActivity.id !== written.id;
+      if (chosenElsewhere) {
+        root.innerHTML = header + `
+          <div class="alert alert-info">You completed this assignment with the interactive lesson,
+            so that report is the version being graded. The answers below are the draft you saved —
+            you can still read them, but they no longer count toward this assignment.</div>
+          <div id="questions"></div>`;
+        renderQuestions(questions, true);
+        document.getElementById('back-btn').addEventListener('click', backToLessons);
+        window.scrollTo(0, 0);
+        return;
+      }
+
+      if (isGraded) {
+        const earned = displayPoints(grade, a) ?? 0;
+        root.innerHTML = header + `
+          <div class="card score-hero">
+            <div class="row wrap" style="justify-content:space-between">
+              <div><div style="font-size:0.78em;opacity:0.8;text-transform:uppercase;letter-spacing:0.05em">Total score</div>
+                <div style="font-size:2em;font-weight:800">${esc(earned)} / ${esc(grade.points_possible ?? a.pointsPossible)} pts</div></div>
+              <div style="font-size:0.85em;opacity:0.85">Graded by your instructor</div>
+            </div>
+          </div>
+          <div id="review-questions"></div>`;
+        renderReviewQuestions(questions, answers, grade.question_scores || {});
+      } else {
+        const banner = committed
+          ? `<div class="alert alert-ok">Submitted${a.due ? ' — you can still edit your answers until ' + fmtDateTime(a.due) : ''}.</div>`
+          : a.isPast
+          ? `<div class="alert alert-warn">This assignment is past due${Object.keys(answers).length ? ' — your saved draft is shown below' : ''}.</div>`
+          : '';
+        root.innerHTML = header + `
+          ${banner}
+          <div id="progress-wrap" style="margin-bottom:8px;${locked?'display:none':''}">
+            <div class="row" style="justify-content:space-between;font-size:0.78em;color:var(--muted);margin-bottom:4px">
+              <span id="progress-label">0 of 0 answered</span><span id="save-status" style="color:var(--green)"></span>
+            </div>
+            <div class="progress-bar-wrap"><div class="progress-bar-fill" id="progress-bar" style="width:0%"></div></div>
+          </div>
+          <div id="questions"></div>
+          <div id="submit-section" style="margin-top:24px;display:${locked?'none':'flex'};gap:12px;align-items:center;flex-wrap:wrap">
+            <button class="btn btn-primary" id="submit-btn">Submit assignment</button>
+            <span id="submit-status" style="font-size:0.85em"></span>
+          </div>`;
+        renderQuestions(questions, locked);
+        updateProgress();
+        document.getElementById('submit-btn')?.addEventListener('click', submitAssignment);
+        if (!locked) wireInputs();
+      }
+      document.getElementById('back-btn').addEventListener('click', backToLessons);
+      window.scrollTo(0, 0);
+    }
+
+    function renderQuestions(questions, readOnly) {
+      const c = document.getElementById('questions');
+      c.innerHTML = questions.map((q, idx) => {
+        const pts = Number(q.points) === 1 ? '1 pt' : `${Number(q.points) || 0} pts`;
+        const val = answers[q.id] ?? '';
+        let input = '';
+        if (q.type === 'multiple_choice') {
+          input = `<div class="mc-options">${(q.options||[]).map((opt)=>`
+            <label class="mc-option ${val===opt?'selected':''}" data-mc="${esc(q.id)}">
+              <input type="radio" name="mc-${esc(q.id)}" value="${esc(opt)}" ${val===opt?'checked':''} ${readOnly?'disabled':''}
+                data-qid="${esc(q.id)}"> ${esc(opt)}</label>`).join('')}</div>`;
+        } else if (q.type === 'numerical') {
+          input = `<input type="number" step="any" value="${esc(String(val))}" placeholder="Enter a number"
+            ${readOnly?'readonly':''} data-qid="${esc(q.id)}" style="max-width:220px">
+            <div class="field-hint">Numerical answer — units not required here.</div>`;
+        } else {
+          input = `<textarea placeholder="Write your response here…" ${readOnly?'readonly':''} data-qid="${esc(q.id)}">${esc(val)}</textarea>`;
+        }
+        const fig = q.figure_url ? `<div style="margin:10px 0 14px;text-align:center"><img src="${esc(q.figure_url)}" alt="Question figure"
+          style="max-width:100%;max-height:320px;border-radius:6px;border:1px solid var(--border)"></div>` : '';
+        const answered = val && String(val).trim() ? ' answered' : '';
+        return `<div class="question-block${answered}" id="qb-${esc(q.id)}">
+          <div class="question-number">Question ${idx+1}</div>
+          <div class="question-text">${esc(q.text)}</div>${fig}
+          <div class="question-pts">${pts}</div>${input}</div>`;
+      }).join('');
+    }
+
+    function wireInputs() {
+      const c = document.getElementById('questions');
+      c.addEventListener('input', (e) => {
+        const t = e.target.closest('[data-qid]');
+        if (t && (t.tagName === 'TEXTAREA' || t.type === 'number')) recordAnswer(t.dataset.qid, t.value);
+      });
+      c.addEventListener('change', (e) => {
+        const r = e.target.closest('input[type="radio"][data-qid]');
+        if (!r) return;
+        recordAnswer(r.dataset.qid, r.value);
+        c.querySelectorAll(`[data-mc="${CSS.escape(r.dataset.qid)}"]`).forEach(l =>
+          l.classList.toggle('selected', l.contains(r) && r.checked));
+      });
+    }
+
+    function recordAnswer(qId, value) {
+      answers[qId] = value;
+      updateProgress();
+      document.getElementById(`qb-${qId}`)?.classList.toggle('answered', String(value).trim().length > 0);
+      clearTimeout(saveTimer);
+      const st = document.getElementById('save-status');
+      if (st) st.textContent = 'Saving…';
+      saveTimer = setTimeout(autoSave, 1200);
+    }
+
+    async function autoSave() {
+      if (!current) return;
+      const { error } = await saveWrittenAnswers(ctx, current.offeringId, current.written.id, answers);
+      const st = document.getElementById('save-status');
+      if (error) {
+        if (st) { st.textContent = '⚠ Save failed'; setTimeout(() => { st.textContent = ''; }, 2500); }
+        return;
+      }
+      if (st) { st.textContent = '✓ Saved'; setTimeout(() => { st.textContent = ''; }, 2000); }
+    }
+
+    function updateProgress() {
+      if (!current) return;
+      const qs = questionsOf(current.written);
+      const answered = qs.filter(q => answers[q.id] && String(answers[q.id]).trim()).length;
+      const lbl = document.getElementById('progress-label');
+      const bar = document.getElementById('progress-bar');
+      if (lbl) lbl.textContent = `${answered} of ${qs.length} answered`;
+      if (bar) bar.style.width = qs.length ? `${Math.round(answered/qs.length*100)}%` : '0%';
+    }
+
+    async function submitAssignment() {
+      const btn = document.getElementById('submit-btn');
+      const status = document.getElementById('submit-status');
+      const qs = questionsOf(current.written);
+      const answered = qs.filter(q => answers[q.id] && String(answers[q.id]).trim()).length;
+
+      // Submitting is now a commitment, not just a flag: it locks the answers and, on a
+      // choice lesson, decides which path is graded. Say that plainly before they click.
+      // No permission clause: as of 2026-08-28 the written path is the cadet's own choice on
+      // every remaining phys-110 / phys-215 assignment, so the only thing left to say here is
+      // that committing to it is one-way.
+      const extra = current.isChoice
+        ? `\n\nThis makes the written preflight the version that counts for this assignment, and you ` +
+          `won't be able to switch to the interactive lesson afterwards.`
+        : '';
+      if (!confirm(`Submit with ${answered} of ${qs.length} questions answered?` +
+                   `\n\nYou can keep editing your answers until the deadline.${extra}`)) return;
+
+      clearTimeout(saveTimer);   // don't let a queued autosave race the submit
+      btn.disabled = true; btn.innerHTML = '<span class="spinner on-dark"></span> Submitting…';
+
+      // Save first so the committed row holds what is on screen, then commit.
+      const { error: saveErr } = await saveWrittenAnswers(ctx, current.offeringId, current.written.id, answers);
+      if (saveErr) {
+        status.textContent = '⚠ Could not save your answers — ' + saveErr.message;
+        status.style.color = 'var(--red)';
+        btn.disabled = false; btn.textContent = 'Submit assignment'; return;
+      }
+
+      const { error } = await commitSubmission(ctx, current.offeringId, current.written.id);
+      if (error) {
+        // The DB refuses for reasons the student needs to read verbatim — e.g. already
+        // committed to the interactive path and locked by switch_policy.
+        status.textContent = '⚠ ' + (error.message || 'Submission failed — please try again.');
+        status.style.color = 'var(--red)';
+        btn.disabled = false; btn.textContent = 'Submit assignment'; return;
+      }
+
+      // The work is committed by here. A failed re-read must say so, not leave "Submitting…" on the button.
+      try { await loadData(); } catch (e) {                    // re-read the committed state
+        status.textContent = 'Submitted. The page could not reload: ' + e.message + ' Reload the page to see it.';
+        status.style.color = 'var(--red)';
+        btn.textContent = 'Submitted';
+        return;
+      }
+      const again = list.find(x => x.offeringId === current.offeringId);
+      if (again) openAssignment(again); else backToLessons();
+    }
+
+    function renderReviewQuestions(questions, studentAnswers, questionScores) {
+      const labels = { full:'✓ Full credit', warn:'⚠ Full credit', zero:'✗ No credit' };
+      document.getElementById('review-questions').innerHTML = questions.map((q, idx) => {
+        const answer = studentAnswers[q.id] ?? '';
+        const qs = questionScores[q.id] || {};
+        const pts = Number(q.points) === 1 ? '1 pt' : `${Number(q.points) || 0} pts`;
+        const status = qs.status || (qs.score >= q.points ? 'full' : 'zero');
+        const ansHTML = !String(answer).trim()
+          ? `<div class="muted" style="font-style:italic;font-size:0.88em">No answer submitted.</div>`
+          : `<div class="review-answer-box">${esc(String(answer))}</div>`;
+        const fbHTML = qs.feedback ? `<div class="review-feedback"><strong>Instructor feedback:</strong> ${esc(qs.feedback)}</div>` : '';
+        const fig = q.figure_url ? `<div style="margin:10px 0 14px;text-align:center"><img src="${esc(q.figure_url)}" alt="Question figure"
+          style="max-width:100%;max-height:320px;border-radius:6px;border:1px solid var(--border)"></div>` : '';
+        return `<div class="question-block">
+          <div class="question-number">Question ${idx+1}</div>
+          <div class="question-text">${esc(q.text)}</div>${fig}
+          <div class="question-pts">${pts}</div>
+          <div class="row" style="margin-bottom:10px">
+            <span class="review-score-badge ${status}">${labels[status]||labels.full}</span>
+            <span class="muted" style="font-size:0.9em">${qs.score ?? '—'} / ${Number(q.points) || 0} pts</span>
+          </div>${ansHTML}${fbHTML}</div>`;
+      }).join('');
+    }
+  </script>
+</body>
+</html>

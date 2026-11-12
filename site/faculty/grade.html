@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js 'sha256-O1yQJpi2tk+FUEfwpxi0rUB9mwFk14n/BCfN/1plBv8=' 'sha256-vTikV882idtGkOHjeBT6cg1HrzpdfnE0+2BATafxLrU='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://wkibeptktbnaddfynrwr.supabase.co https://dfpm-physics.github.io; connect-src 'self' https://wkibeptktbnaddfynrwr.supabase.co wss://wkibeptktbnaddfynrwr.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grade · PREP</title>
+  <script>(function(){try{var s=localStorage.getItem('cp.theme');var m=s||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(m==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <link rel="stylesheet" href="../css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O" crossorigin="anonymous"></script>
+  <script src="../js/config.js"></script>
+</head>
+<body>
+  <header id="topnav"></header><script src="../js/nav-shell.js"></script>
+  <main class="page-wide" id="main">
+    <div class="page-head"><h1>Grade</h1><div class="sub">Score submissions and publish grades to students.</div></div>
+
+    <div class="toolbar">
+      <div class="field grow"><label for="asgn">Assignment</label><select id="asgn"></select></div>
+      <div class="field"><label for="section">Section</label><select id="section"></select></div>
+      <div class="field lamp-filter">
+        <label id="lamp-label">Show answers</label>
+        <div class="lamp-row" role="group" aria-labelledby="lamp-label" id="lamps">
+          <button type="button" class="lamp" data-lamp="full" aria-pressed="true"
+                  title="Full credit" aria-label="Full credit"><span data-count>0</span></button>
+          <button type="button" class="lamp" data-lamp="warn" aria-pressed="true"
+                  title="Flagged for review" aria-label="Flagged for review"><span data-count>0</span></button>
+          <button type="button" class="lamp" data-lamp="zero" aria-pressed="true"
+                  title="No credit" aria-label="No credit"><span data-count>0</span></button>
+          <!-- One-click triage, rebuilt from the legacy Grade tab's "Show flagged only"
+               (LEGACY-AUDIT-2026-07-20.md §2.3) — the thing that makes reviewing a whole
+               section of AI suggestions tractable. The lamps could already express it in two
+               clicks; this makes it one, and one click back. -->
+          <button type="button" class="tbtn lamp-only" id="flagged-only"
+                  title="Show only answers flagged for review or given no credit">Flagged only</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- P1.14 — the hand-grading queue. A row of compact cards, one per student waiting on a
+         human, ABOVE the grading view and open by default. It replaced two collapsed <details>
+         worklists that counted at assignment granularity: "3 outstanding on preflight-02" tells
+         you a number, not who, and closed queues showing a number are read as decoration.
+         Shaped like the lesson builder's orphan strip (.lb-orphan) because it is the same idea —
+         a small pile of things waiting to be dealt with, each one click from being dealt with. -->
+    <section class="hq-wrap" id="hq" hidden>
+      <div class="hq-head">
+        <h2>📌 Needs grading by hand</h2>
+        <span class="count-pill" id="hq-count">0</span>
+        <span class="hq-scope muted" id="hq-scope"></span>
+        <span class="grow"></span>
+        <span class="muted hq-note">The AI run happens once, after the deadline. These arrived after it.</span>
+      </div>
+      <div class="hq-cards" id="hq-cards"></div>
+    </section>
+
+    <!-- Sticky, because the two buttons that write are at the BOTTOM of a page that runs to twenty
+         cards. It is the one thing on this screen that has to stay true wherever the reader is. -->
+    <div class="alert alert-warn dirty-banner" id="dirty-banner" role="status" hidden></div>
+
+    <div id="grade-container">
+      <div class="muted">Select an assignment to begin grading.</div>
+    </div>
+    <div class="filter-empty muted" id="filter-empty" style="display:none">
+      No answers match the lit lamps. Click a lamp to bring those answers back.
+    </div>
+
+    <!-- "Mark section reviewed" stood between these two until 2026-07-27 (faculty beta). It
+         assumed an instructor reviewed and a DIRECTOR published; there is no second person, and
+         Finalize publishes exactly the sections loaded here — which any staff member of those
+         sections has always been entitled to do (grades_staff_write). See faculty-grade.js. -->
+    <div class="grade-actions" id="grade-actions" style="display:none">
+      <button class="btn btn-primary" id="save-btn">Save draft</button>
+      <button class="btn btn-secondary" id="finalize-btn">Finalize &amp; publish</button>
+      <span id="save-status" class="muted" style="font-size:0.85em"></span>
+      <span class="grow"></span>
+      <span class="muted" style="font-size:0.78em">Yellow = full credit flagged for review · click a credit chip to cycle</span>
+    </div>
+  </main>
+
+  <div class="modal-backdrop" id="ext-modal">
+    <div class="modal" style="max-width:460px">
+      <div class="modal-head"><h2 id="ext-heading">Grant extension</h2><button class="modal-close" data-close>×</button></div>
+      <p class="muted" style="font-size:0.88em;margin-bottom:14px" id="ext-name"></p>
+      <div class="field"><label for="ext-due">New due date &amp; time</label>
+        <input type="datetime-local" id="ext-due"></div>
+      <div class="field"><label for="ext-reason">Reason <span class="req">required</span></label>
+        <input type="text" id="ext-reason" maxlength="200"
+               placeholder="e.g. Cadet was on a scheduled team trip.">
+        <div class="field-hint">Your course director sees this alongside a count of the extensions you have granted.</div>
+      </div>
+      <div class="error-msg" id="ext-error" style="min-height:1em"></div>
+      <div class="row" style="gap:10px;margin-top:8px">
+        <button class="btn btn-primary" id="ext-save">Save extension</button>
+        <button class="btn btn-secondary" data-close>Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { bootstrap } from '../js/auth.js';
+    import { renderNav } from '../js/nav.js';
+    import { initTheme } from '../js/theme.js';
+    import { esc, lastFirst, fmtDate, fmtDateTime, runPage, wireModalDismiss } from '../js/util.js';
+    // Questions now live in the written activity's content, not on the assignment row.
+    import { questionsOf, submissionLateness, lateBy, actionableSections,
+             cardKindFor, effortSignal } from '../js/schema.js';
+    // The 3-state control lives in its own module because student.html grades too now — see its
+    // header on why one copy matters more than the eight lines it saves. The points control beside
+    // it is the same idea for a card that has no questions to chip.
+    import {
+      CREDIT_LABEL as LABEL, applyCredit, creditControl, creditControlNode,
+      dirtyCount as countDirty, WARN_HINT,
+      applyPoints, pointsControl, pointsControlNode, pointsLabel, pointsStatus,
+    } from '../js/grade-controls.js';
+    import * as G from '../js/faculty-grade.js';
+
+    const ctx = await bootstrap({ require: 'faculty' });
+    runPage(ctx, init);
+
+    // ── State ──
+    let gradeData = {}, current = null, extensionMap = {}, scoreMap = {}, responseMap = {};
+    // `current` is now an assignment OFFERING (shapeOffering), not an assignment row.
+    //
+    // TWO EDIT MODELS, EXACT COMPLEMENTS. `gradeData` holds the students on the written card
+    // (sid -> questionId -> entry); `effortData` holds everyone else (sid -> entry) — the
+    // interactive takers and the cadets who have committed to nothing. faculty-grade.js builds both
+    // from the same cardKindFor() call, so a student is in exactly one and no Save can write them
+    // twice. currentStudents is now the WHOLE roster again: nobody is dropped from this page.
+    let currentStudents = [], enrollmentOf = {}, questions = [], submissionMap = {}, effortData = {};
+    // Cadets whose saved grade is a zero written before they handed in (G.staleZeroIds).
+    let staleIds = new Set();
+    let maxTotal = 0, extSid = null;
+    let cachedMy = [], cachedAll = [];
+    // ?a=<assignment offering uuid> — how the dashboard's per-lesson due-out boxes and the
+    // gradebook land you on the lesson they were counting, instead of on an empty picker.
+    // Consumed once, on the first populate(), then forgotten so a course switch does not re-apply it.
+    let deepLink = new URLSearchParams(location.search).get('a') || '';
+
+    const asgnSel = () => document.getElementById('asgn');
+    const secSel  = () => document.getElementById('section');
+    const container = () => document.getElementById('grade-container');
+
+    async function init() {
+      initTheme();
+      renderNav(ctx, { active: 'grade', onCourseChange: () => populate(true) });
+      // Arriving from the Grade assignments list (?back=entry) gets a way back to it.
+      if (new URLSearchParams(location.search).get('back') === 'entry') {
+        document.querySelector('.page-head')?.insertAdjacentHTML('beforebegin',
+          '<div style="margin-bottom:10px"><a class="btn btn-ghost btn-sm" href="entry.html">← Back to Grade assignments</a></div>');
+      }
+      // Persistent delegated listeners (container survives re-renders)
+      container().addEventListener('click', onClick);
+      container().addEventListener('input', onInput);
+      asgnSel().addEventListener('change', pickerChanged);
+      secSel().addEventListener('change', pickerChanged);
+      wireLamps();
+      document.getElementById('save-btn').addEventListener('click', doSave);
+      document.getElementById('finalize-btn').addEventListener('click', doFinalize);
+      wireExtModal();
+      wireQueue();
+      await populate(false);
+    }
+
+    async function populate(reset) {
+      if (!ctx.currentOffering) { container().innerHTML = `<div class="alert alert-warn">No course access.</div>`; return; }
+      const [asgns, my, all] = await Promise.all([
+        G.gradeAssignmentList(ctx, { gradedByPerson: true }),
+        G.mySectionIds(ctx),
+        ctx.isDirectorForCurrent() ? G.allSectionIds(ctx) : Promise.resolve([]),
+      ]);
+      cachedMy = my; cachedAll = all;
+
+      // A ?a= deep link wins over the retained pick, once. It is dropped if it names an
+      // assignment this offering does not hold — a link built for phys-215 opened after a course
+      // switch would otherwise leave the picker on a value with nothing behind it.
+      const linked = deepLink && asgns.some(a => a.id === deepLink) ? deepLink : '';
+      deepLink = '';
+      const keepA = linked || (reset ? '' : asgnSel().value);
+      asgnSel().innerHTML = '<option value="">— select assignment —</option>' +
+        asgns.map(a => `<option value="${esc(a.id)}"${a.id === keepA ? ' selected' : ''}>${esc(a.title)}</option>`).join('');
+
+      const director = ctx.isDirectorForCurrent();
+      const list = director ? all : my;
+      secSel().innerHTML = '<option value="">— all my sections —</option>'
+        + (director ? '<option value="__all__">All sections (entire course)</option>' : '')
+        // A section id is a uuid now; the CODE is what an instructor recognises.
+        + list.map(s => `<option value="${esc(s)}">${esc(ctx.sectionCodeOf(s))}</option>`).join('');
+
+      // An arriving deep link must load even on the first paint, where `reset` is false and the
+      // retained value was empty — the branch below would otherwise fall through to renderQueue().
+      if (linked) { await loadView(); return; }
+
+      if (reset) {
+        container().innerHTML = `<div class="muted">Select an assignment to begin grading.</div>`;
+        document.getElementById('grade-actions').style.display = 'none';
+        renderQueue();
+      }
+      else if (asgnSel().value) loadView();
+      // No assignment picked yet — which is how the page ALWAYS opens. loadView() paints the queue
+      // on every later load, but it does not run here, so without this the standing worklist would
+      // be invisible until the reader had already chosen where to look. That is the queue's whole
+      // reason for existing, inverted.
+      else renderQueue();
+    }
+
+    function resolveSectionIds() {
+      const v = secSel().value;
+      return v === '__all__' ? cachedAll : v ? [v] : cachedMy;
+    }
+
+    /* Changing assignment or section reloads from the database, which discards anything unsaved.
+     * The banner says the work is unwritten; this is what stops a picker throwing it away without
+     * asking. Reverting the <select> on refusal is the part that matters — leaving it moved would
+     * put one assignment's name above another's cards.
+     *
+     * Deliberately NOT inside loadView(). doSave() calls loadView() the moment a save succeeds,
+     * and at that point the old model still carries its `modified` flags — a guard down there
+     * would interrogate the operator about changes they had just written. */
+    let lastPick = { asgn: '', sec: '' };
+
+    async function pickerChanged() {
+      const n = dirtyCount();
+      if (n && !confirm(`You have ${n} unsaved change${n === 1 ? '' : 's'} on screen.\n\n`
+                      + `Loading a different view discards them. Continue?`)) {
+        asgnSel().value = lastPick.asgn;
+        secSel().value = lastPick.sec;
+        return;
+      }
+      await loadView();
+    }
+
+    async function loadView() {
+      const asgnId = asgnSel().value;
+      const actions = document.getElementById('grade-actions');
+      lastPick = { asgn: asgnId, sec: secSel().value };
+      if (!asgnId) {
+        container().innerHTML = `<div class="muted">Select an assignment to begin grading.</div>`;
+        actions.style.display = 'none';
+        gradeData = {}; updateDirtyBanner();
+        return;
+      }
+      container().innerHTML = `<div class="center-load"><span class="spinner"></span><span>Loading…</span></div>`;
+
+      const data = await G.loadGradingData(ctx, asgnId, resolveSectionIds());
+      if (!data.offering) {
+        container().innerHTML = `<div class="alert alert-error">${data.refusal ? esc(data.refusal.message) : 'Assignment not found.'}</div>`;
+        actions.style.display = 'none';
+        gradeData = {}; updateDirtyBanner();
+        return;
+      }
+      current = data.offering; responseMap = data.responseMap; scoreMap = data.gradeMap; extensionMap = data.extensionMap;
+      submissionMap = data.submissionMap;
+
+      /* INTERACTIVE TAKERS ARE BACK ON THIS PAGE (2026-08-21), with a card they can be graded on.
+       *
+       * From 2026-07-27 they were filtered out here entirely. The reasoning was sound as far as it
+       * went — a card that cannot be graded, in the middle of a screen whose entire purpose is
+       * grading, for a student migration 015 already finalized — but the fix removed the student
+       * instead of fixing the card, and it left two holes.
+       *
+       * The exclusion tested `isEffortGraded()`, i.e. "has this cadet COMMITTED to something other
+       * than the written activity". On an interaction-required offering that is nobody until the
+       * deadline nears, so the whole roster fell through to the written card and every unanswered
+       * question defaulted to red "No credit" — ~157 of ~169 cadets on preflight-07, all stamped
+       * with no credit on questions that carry no credit for them.
+       *
+       * And the note it left behind sent the reader to the student page to "adjust one", where
+       * Save and Finalize were disabled for exactly those students. There was no way to change an
+       * interactive grade anywhere in the UI.
+       *
+       * Nobody is dropped now. cardKindFor() decides per student, in one place, and the two edit
+       * models below are exact complements of that decision.
+       */
+      currentStudents = data.students;
+
+      // Enrollment is the key for every per-student write now (grades, extensions), so keep
+      // the map the click handlers need — they only ever have a student id to hand.
+      enrollmentOf = Object.fromEntries(data.students.map(s => [s.student_id, s.enrollment_id]));
+      questions = questionsOf(current.written);
+      // The offering's points_possible is authoritative — the DB CHECK bounds points_earned
+      // against exactly that column, not against the sum of the question list.
+      maxTotal = Number(current.pointsPossible ?? 0);
+
+      if (!currentStudents.length) {
+        container().innerHTML = `<div class="alert alert-warn">No students found for the selected section(s).</div>`;
+        actions.style.display = 'none';
+        gradeData = {}; effortData = {}; updateDirtyBanner();
+        renderQueue();
+        return;
+      }
+
+      // The two models. Both call cardKindFor() over the same inputs, so every student lands in
+      // exactly one — see buildGradeData()'s header on why a student in both would be written
+      // twice by one Save, in two upserts, with the second silently overwriting the first.
+      // A zero written before the cadet handed in (G.staleZeroIds) is not a grade of what is on
+      // screen: the card starts from the answers, says why, and neither Save nor Finalize re-sends
+      // it until someone changes something on it.
+      staleIds = G.staleZeroIds(current, currentStudents, scoreMap, submissionMap, responseMap);
+      gradeData = G.buildGradeData(current, currentStudents, responseMap, scoreMap, submissionMap, staleIds);
+      effortData = G.buildEffortData(current, currentStudents, scoreMap, submissionMap, responseMap);
+      render(currentStudents);
+      // A fresh model has nothing modified in it, so this clears the banner AND re-baselines every
+      // `original` — which is what collapses the before → after pairs back to single chips once a
+      // save has landed. Both loadView() call sites after a write depend on it.
+      updateDirtyBanner();
+      actions.style.display = 'flex';
+      // Deliberately not awaited: the queue is cross-assignment and reloads from scratch, and the
+      // grading view the reader asked for must not wait on a panel above it.
+      renderQueue();
+    }
+
+    const isZeroPointQuestion = q => Number(q?.points) === 0;
+
+    /** The pending total for one card, or null when nothing has been graded at all. */
+    function studentTotal(sid) {
+      // A student on a non-written card has no gradeData entry (the two models are complements).
+      // Their total is the one number the card holds — pending, so the header moves with the chip.
+      const ed = effortData[sid];
+      if (ed) return ed.points;
+      return questions.reduce((s, q) => s + (Number(gradeData[sid]?.[q.id]?.score) || 0), 0);
+    }
+
+    const totalText = t =>
+      `${t == null ? '—' : Number(t).toFixed(2)} / ${maxTotal.toFixed(2)} pts`;
+
+    /* A zero written before the cadet handed in (G.staleZeroIds). Unpublished, the card has already
+       dropped it and starts from the answers; published, the card shows what the cadet sees, and
+       the only way to change it is Reopen. Either way the reader is told, because the card on its
+       own looks like an ordinary grade — which is how six of these got published. */
+    function staleNote(sid, finalized) {
+      if (!staleIds.has(sid)) return '';
+      return finalized
+        ? `<div class="alert alert-warn" style="margin-bottom:10px">This zero was published
+             <b>before this cadet handed in</b>. Their answers are below. Use <b>Reopen</b> above,
+             then grade them.</div>`
+        : `<div class="alert alert-warn" style="margin-bottom:10px">The saved zero was written
+             <b>before this cadet handed in</b>, so it is not shown. Grade the answers below —
+             <b>Finalize &amp; publish</b> skips this card until you change something on it.</div>`;
+    }
+
+    /* Say how the roster splits between the two kinds of card, so the numbers on screen can be
+       reconciled against the roster and the dashboard without counting cards by eye. This used to
+       say how many students were HIDDEN, and pointed the reader at the student page to adjust one
+       — where the controls were disabled. Nothing is hidden now. */
+    function pathNote(students) {
+      const n = students.reduce((a, st) => {
+        const k = effortData[st.student_id]?.kind || 'written';
+        a[k] = (a[k] || 0) + 1; return a;
+      }, {});
+      const parts = [];
+      if (n.written) parts.push(`${n.written} on the written questions`);
+      if (n.interactive) parts.push(`${n.interactive} on the interactive lesson`);
+      if (n.nosubmission) parts.push(`${n.nosubmission} with no work in yet`);
+      if (parts.length < 2) return '';
+      return `<div class="muted" style="font-size:0.85em;margin-bottom:12px">
+        ${esc(parts.join(' · '))}. An interactive lesson is graded automatically from its report on
+        submission; the toggle on those cards overrides that score.</div>`;
+    }
+
+    function render(students) {
+      const qs = questions;
+      const displayQs = qs.filter(q => !isZeroPointQuestion(q));
+      container().innerHTML = pathNote(students) + students.map(st => {
+        const sid = st.student_id;
+        const finalized = scoreMap[sid]?.finalized;
+        const ext = extensionMap[sid];
+        const total = studentTotal(sid);
+        const nm = esc(lastFirst(st.name));
+
+        // A student with no grade row at all is NOT the same as one scored zero. Saving no
+        // longer invents a grade for them (faculty-grade.js gradeRows rule 2), so the card
+        // has to say so — otherwise "not yet graded" is indistinguishable from "graded 0".
+        const prior = scoreMap[sid];
+        const provenance = !prior
+          ? `<span class="tag tag-ungraded">Not yet graded</span>`
+          : prior.source === 'ai_suggested'
+            ? `<span class="tag tag-ai">AI suggested</span>` : '';
+
+        // Did this arrive after the student's own deadline? Extensions are honoured inside
+        // submissionLateness(), so a student who submitted within a granted extension is not late.
+        // Rendered next to the extension chip because the two are read together: "late — and did
+        // they have an extension?" is one question, not two.
+        const late = submissionLateness(
+          current, st.section_id, extensionMap[sid]?.due || null, submissionMap[sid]?.committedAt);
+
+        const headExtras = `
+          ${finalized ? `<span class="tag" style="background:var(--alert-ok-bg);color:var(--alert-ok-fg)">✅ Finalized</span>
+            <button class="btn btn-ghost btn-sm" data-act="reopen" data-sid="${sid}" data-name="${nm}">Reopen</button>` : ''}
+          ${provenance}
+          ${late.late ? `<span class="tag tag-late" title="Submitted ${esc(fmtDateTime(late.at))} · due ${esc(fmtDateTime(late.due))}">⏰ ${esc(lateBy(late.ms))}</span>` : ''}
+          ${ext ? `<span class="ext-chip" title="${esc(ext.reason)}">📅 ${esc(fmtDate(ext.due))}</span>
+            <button class="btn btn-ghost btn-sm" data-act="ext" data-sid="${sid}" data-name="${nm}">Edit</button>
+            <button class="btn btn-ghost btn-sm" data-act="ext-remove" data-sid="${sid}" data-name="${nm}">Remove</button>`
+            : `<button class="btn btn-ghost btn-sm" data-act="ext" data-sid="${sid}" data-name="${nm}">Grant extension</button>`}`;
+
+        /* THE NON-WRITTEN CARDS. An interactive taker has no answers to score — migration 014's
+           CHECK forces question_scores to stay empty on any row carrying an effort — so the body is
+           the one number their grade is, plus the evidence for it. A cadet who has committed to
+           nothing gets the same body with nothing to show yet, and the same control: awarding
+           credit to someone whose submission never landed (a technical failure, a lost upload) is
+           the case this card exists to make possible without inventing a written submission. */
+        if (effortData[sid]) {
+          const ed = effortData[sid];
+          const { effort, source } = effortSignal(scoreMap[sid] || null, null);
+          const measured = effort == null ? '' :
+            ` · effort <b>${effort}/5</b> <span class="muted">(${source === 'grade' ? 'graded' : 'measured by the lesson'})</span>`;
+
+          const evidence = ed.kind === 'interactive'
+            ? `<div class="gq-text">Graded from the interactive lesson report${measured}.
+                 <a href="student.html?e=${encodeURIComponent(enrollmentOf[sid] || '')}">Open the full report</a>.</div>`
+            : `<div class="grade-answer empty">No submission on any graded path.</div>`;
+
+          const control = finalized
+            ? `<span class="credit-toggle ${pointsStatus(ed.points, maxTotal)}" disabled>${esc(pointsLabel(ed.points, maxTotal))}</span>`
+            : pointsControl(sid, ed, maxTotal);
+          const note = finalized
+            ? (ed.note ? `<div class="feedback-block" style="margin-top:8px">${esc(ed.note)}</div>` : '')
+            : `<textarea class="feedback-input" data-act="note" data-sid="${sid}"
+                 placeholder="Why this score — shown to the cadet (required to withhold credit)…">${esc(ed.note)}</textarea>`;
+          /* Migration 015 finalizes an interactive grade the moment it commits, so this chip is
+             disabled on essentially every interactive card — the published-work-is-read-only rule
+             applying exactly as it does to a written card. Left as it is, that reads as a broken
+             control rather than a locked one, so say which button unlocks it. */
+          const lock = finalized
+            ? `<div class="warn-hint" style="color:var(--muted)">This grade is published, so the score is locked.
+                 Use <b>Reopen</b> above to change it.</div>`
+            : '';
+
+          return `<div class="grade-card${finalized ? ' finalized' : ''}" id="gc-${sid}"
+                       data-card-filter="${pointsStatus(ed.original, maxTotal)}">
+            <div class="gc-head">
+              <span class="gc-name">${nm}</span><span class="tag">Sec ${esc(ctx.sectionCodeOf(st.section_id))}</span>
+              ${headExtras}
+              <span class="gc-total" id="tot-${sid}">${esc(totalText(total))}</span>
+            </div>
+            <div class="gc-body gc-effort">
+              <div class="grade-q" data-effort>
+                <div class="gq-head"><span class="gq-label">${ed.kind === 'interactive' ? 'Interactive lesson' : 'No submission'}</span>${control}</div>
+                ${evidence}${note}${lock}
+              </div>
+            </div>
+          </div>`;
+        }
+
+        const rows = displayQs.map(q => {
+          const idx = qs.indexOf(q);
+          const ans = responseMap[sid]?.[q.id] ?? '';
+          const hasAns = String(ans).trim().length > 0;
+          const gd = gradeData[sid][q.id];
+          const fig = q.figure_url ? `<div style="margin:6px 0 10px;text-align:center"><img src="${esc(q.figure_url)}" alt="Question figure"
+            style="max-width:100%;max-height:240px;border-radius:6px;border:1px solid var(--border)"></div>` : '';
+          const control = finalized
+            ? `<span class="credit-toggle ${gd.status}" disabled>${LABEL[gd.status]}</span>`
+            : creditControl(sid, q, gd);
+          const feedback = finalized
+            ? (gd.feedback ? `<div class="feedback-block" style="margin-top:8px">${esc(gd.feedback)}</div>` : '')
+            : `<textarea class="feedback-input" data-act="feedback" data-sid="${sid}" data-qid="${esc(q.id)}" placeholder="Feedback for student (optional)…">${esc(gd.feedback)}</textarea>`;
+          const hint = (gd.status === 'warn' && !finalized) ? `<div class="warn-hint" data-hint>${WARN_HINT}</div>` : '';
+          // TWO status attributes, and they are different questions.
+          //   data-status — what the answer IS now, pending save. Drives nothing but the row tint.
+          //   data-filter — what it was on load. THIS is what the lamps filter on, so re-scoring
+          //     an answer never makes it vanish out from under the reader. See buildGradeData's
+          //     `original`.
+          return `<div class="grade-q" data-status="${gd.status}" data-filter="${gd.original}" id="row-${sid}-${esc(q.id)}">
+            <div class="gq-head"><span class="gq-label">Q${idx + 1} · ${q.points} pts</span>${control}</div>
+            <div class="gq-text">${esc(q.text)}</div>${fig}
+            <div class="grade-answer ${hasAns ? '' : 'empty'}">${hasAns ? esc(String(ans)) : 'No answer submitted.'}</div>
+            ${feedback}${hint}
+          </div>`;
+        }).join('');
+
+        return `<div class="grade-card${finalized ? ' finalized' : ''}" id="gc-${sid}">
+          <div class="gc-head">
+            <span class="gc-name">${nm}</span><span class="tag">Sec ${esc(ctx.sectionCodeOf(st.section_id))}</span>
+            ${headExtras}
+            <span class="gc-total" id="tot-${sid}">${esc(totalText(total))}</span>
+          </div>
+          <div class="gc-body">${staleNote(sid, finalized)}${rows}</div>
+        </div>`;
+      }).join('');
+      applyFilters();
+    }
+
+    // ── Events ──
+    function onClick(e) {
+      const el = e.target.closest('[data-act]');
+      if (!el) return;
+      const sid = Number(el.dataset.sid), name = el.dataset.name;
+      switch (el.dataset.act) {
+        case 'toggle': toggleCredit(sid, el.dataset.qid, Number(el.dataset.pts)); break;
+        case 'points': togglePoints(sid); break;
+        case 'reopen': reopen(sid, name); break;
+        case 'ext': openExt(sid, name); break;
+        case 'ext-remove': removeExt(sid, name); break;
+      }
+    }
+    function onInput(e) {
+      const t = e.target.closest('textarea[data-act="feedback"], textarea[data-act="note"]');
+      if (!t) return;
+      const sid = Number(t.dataset.sid);
+      if (t.dataset.act === 'note') {
+        const ed = effortData[sid];
+        if (ed) { ed.note = t.value; ed.modified = true; updateDirtyBanner(); }
+        return;
+      }
+      const gd = gradeData[sid]?.[t.dataset.qid];
+      if (gd) { gd.feedback = t.value; gd.modified = true; updateDirtyBanner(); }
+    }
+
+    // The banner's two shortcuts. Delegated here rather than bound per render because the banner
+    // is rebuilt on every keystroke that changes the count.
+    document.getElementById('dirty-banner').addEventListener('click', (e) => {
+      const el = e.target.closest('[data-act]');
+      if (!el) return;
+      if (el.dataset.act === 'jump-save') doSave();
+      else if (el.dataset.act === 'jump-finalize') doFinalize();
+    });
+
+    function toggleCredit(sid, qid, pts) {
+      const gd = applyCredit(gradeData[sid][qid], pts);
+
+      const row = document.getElementById(`row-${sid}-${qid}`);
+      if (row) {
+        // The whole control is replaced rather than the chip relabelled: it may have just grown or
+        // lost the before → after pair, and that is a change of shape, not of text.
+        const head = row.querySelector('.gq-head');
+        const old = head?.querySelector('.credit-change, .credit-toggle');
+        if (old) old.replaceWith(creditControlNode(sid, { id: qid, points: pts }, gd));
+        row.dataset.status = gd.status;      // tint follows the pending value…
+        // …and data-filter deliberately does NOT change. See the render comment.
+        let hint = row.querySelector('[data-hint]');
+        if (gd.status === 'warn' && !hint) {
+          hint = document.createElement('div'); hint.className = 'warn-hint'; hint.dataset.hint = '1';
+          hint.textContent = WARN_HINT;
+          row.appendChild(hint);
+        } else if (gd.status !== 'warn' && hint) hint.remove();
+      }
+      const tot = document.getElementById(`tot-${sid}`);
+      if (tot) tot.textContent = totalText(studentTotal(sid));
+      applyFilters();
+      updateDirtyBanner();
+    }
+
+    /* The same click, for a card with one number instead of a column of answers. Deliberately does
+       NOT re-run applyFilters(): an effort card is filtered on `data-card-filter`, the value it had
+       at LOAD, for the same reason a re-scored answer keeps its lamp — the card you are working on
+       must not vanish out from under you mid-decision. */
+    function togglePoints(sid) {
+      const ed = effortData[sid];
+      if (!ed) return;
+      applyPoints(ed, maxTotal);
+
+      const card = document.getElementById(`gc-${sid}`);
+      const old = card?.querySelector('.credit-change, .credit-toggle');
+      // Replaced whole rather than relabelled: it may have just grown or lost the before → after
+      // pair, and that is a change of shape, not of text.
+      if (old) old.replaceWith(pointsControlNode(sid, ed, maxTotal));
+      const tot = document.getElementById(`tot-${sid}`);
+      if (tot) tot.textContent = totalText(ed.points);
+      updateDirtyBanner();
+    }
+
+    /* ── "Nothing is saved yet" ──────────────────────────────────────────────────
+     * A banner pinned to the top of the page for as long as any edit is unwritten, because the
+     * two things that write are at the BOTTOM of a page that is often twenty cards long. An
+     * instructor who re-scored six answers and navigated away lost all six, and nothing on screen
+     * had ever said otherwise — the only feedback was a status line beside a button they had
+     * scrolled past.
+     *
+     * Counts questions, not students, because that is the unit being changed and the number the
+     * reader can check against what they remember doing. Feedback typing counts too: `modified` is
+     * set by the textarea handler as well, and losing a paragraph of written feedback is worse
+     * than losing a click. A non-written card has no questions, so it counts once — the toggle and
+     * its note are the one decision.
+     */
+    const dirtyCount = () => countDirty(gradeData) + countDirty(effortData);
+
+    function updateDirtyBanner() {
+      const el = document.getElementById('dirty-banner');
+      const n = dirtyCount();
+      el.hidden = n === 0;
+      if (!n) return;
+      el.innerHTML = `<strong>${n} unsaved change${n === 1 ? '' : 's'}.</strong>
+        Nothing reaches the student — or the gradebook — until you
+        <button type="button" class="linkish" data-act="jump-save">Save draft</button> or
+        <button type="button" class="linkish" data-act="jump-finalize">Finalize &amp; publish</button>
+        at the bottom of the page.`;
+    }
+
+    // Warn on the way out. The banner is the visible reminder; this is the one that catches
+    // somebody who never scrolled far enough to see it. Browsers ignore custom text here and show
+    // their own wording, so there is none to write.
+    window.addEventListener('beforeunload', (e) => {
+      if (dirtyCount()) { e.preventDefault(); e.returnValue = ''; }
+    });
+
+    // ── Status-lamp filter ──
+    // The lamps are a traffic light: lit means "show answers with this status", dark means hide
+    // them. Filtering is pure DOM work against `.grade-q[data-status]` — no refetch — but it has
+    // to run after every render AND every credit toggle, or the view drifts out of step with the
+    // lamps. `data-status` is the only hook present on both the finalized and editable branches.
+    //
+    // The "Late only" filter that used to AND with these lamps was WITHDRAWN 2026-07-23 (P1.14).
+    // It answered the wrong question — an instructor does not want a section narrowed down to its
+    // late work, they want the short list of submissions needing attention, which is now the queue
+    // above. The late CHIP on the card stays: that is context while grading a specific student,
+    // and it was never what was objected to.
+    const lampOn = { full: true, warn: true, zero: true };
+    const LAMP_NAME = { full: 'Full credit', warn: 'Flagged for review', zero: 'No credit' };
+
+    function wireLamps() {
+      document.getElementById('lamps').addEventListener('click', (e) => {
+        const btn = e.target.closest('.lamp');
+        if (!btn) return;
+        const k = btn.dataset.lamp;
+        lampOn[k] = !lampOn[k];
+        btn.setAttribute('aria-pressed', String(lampOn[k]));
+        applyFilters();
+      });
+
+      // Toggles between "flagged only" (full off, warn+zero on) and all three lit. Deliberately
+      // not a third state: the lamps remain the source of truth, and this only drives them.
+      document.getElementById('flagged-only')?.addEventListener('click', (e) => {
+        const on = !(lampOn.full === false && lampOn.warn && lampOn.zero);
+        lampOn.full = !on; lampOn.warn = true; lampOn.zero = true;
+        e.currentTarget.classList.toggle('on', on);
+        e.currentTarget.textContent = on ? 'Show all' : 'Flagged only';
+        document.querySelectorAll('.lamp[data-lamp]').forEach(b =>
+          b.setAttribute('aria-pressed', String(lampOn[b.dataset.lamp] !== false)));
+        applyFilters();
+      });
+    }
+
+    function applyFilters() {
+      const counts = { full: 0, warn: 0, zero: 0 };
+      let anyRows = false, shownCards = 0;
+
+      document.querySelectorAll('.grade-card').forEach(card => {
+        // `[data-effort]` is excluded because the lamps count ANSWERS, and a non-written card has
+        // none. Folding it into the tallies would make "No credit — 4 answers" describe three
+        // answers and a cadet. The card still honours the lamps, via `data-card-filter` below.
+        const rows = card.querySelectorAll('.grade-q:not([data-effort])');
+        if (rows.length) anyRows = true;
+        let shown = 0;
+        rows.forEach(row => {
+          // FILTER on what the answer was when the page loaded (`data-filter`), COUNT the same —
+          // so the lamp numbers describe the set the lamps are actually selecting. Filtering on
+          // the live status made a re-scored answer vanish from under the reader; counting on it
+          // made the numbers drift away from the rows they claim to count. Both settle on the
+          // next load, which is when the reader's chosen set is genuinely stale.
+          const s = row.dataset.filter || row.dataset.status;
+          if (counts[s] !== undefined) counts[s]++;
+          const show = lampOn[s] !== false;
+          row.style.display = show ? '' : 'none';
+          if (show) shown++;
+        });
+        // A card with no gradable rows is either a non-written card, which carries its own
+        // load-time colour, or a written one where every question is worth 0 pts. The second kind
+        // stays visible rather than being silently dropped; the first honours its lamp so that
+        // "Flagged only" on an interaction lesson narrows to the cards worth a second look instead
+        // of showing all 169. `none` — nobody has graded them — has no colour and always shows.
+        const cf = card.dataset.cardFilter;
+        const visible = rows.length ? shown > 0
+          : (cf && cf !== 'none') ? lampOn[cf] !== false
+          : true;
+        card.style.display = visible ? '' : 'none';
+        if (visible) shownCards++;
+      });
+
+      // The count is the button's only text, so it would otherwise BE the accessible name
+      // ("0, pressed"). Keep an explicit label carrying both the colour's meaning and the count.
+      for (const [k, n] of Object.entries(counts)) {
+        const btn = document.querySelector(`.lamp[data-lamp="${k}"]`);
+        if (!btn) continue;
+        btn.querySelector('[data-count]').textContent = n;
+        btn.setAttribute('aria-label', `${LAMP_NAME[k]} — ${n} answer${n === 1 ? '' : 's'}`);
+      }
+      document.getElementById('filter-empty').style.display =
+        (anyRows && shownCards === 0) ? '' : 'none';
+    }
+
+    // ── Save / finalize / reopen ──
+    async function doSave() {
+      const st = document.getElementById('save-status'); st.textContent = 'Saving…';
+      const { error, skipped } = await G.saveScores(ctx, current, currentStudents, gradeData, scoreMap, effortData,
+        { skipIds: staleIds });
+      st.textContent = error ? '⚠ Save failed: ' + error.message
+        : skipped ? 'Nothing to save — nothing unpublished was edited.'
+        : '✓ Saved draft';
+      setTimeout(() => { st.textContent = ''; }, 4000);
+      if (!error && !skipped) loadView();
+    }
+
+    /**
+     * Publishing is irreversible from the student's side, so the prompt states the real
+     * blast radius: how many rows, and across which sections. It used to say neither, while
+     * writing every student in the loaded scope — which for a director who had selected
+     * "All sections (entire course)" meant the whole course in one click.
+     *
+     * Since 2026-09-29 it also publishes what the cards alone never reached — the no-submission
+     * zeros on a lesson with an iPREP option, and a zero for a cadet with no grade at all — under
+     * G.planPublish(), the same rule the director's Publish-all runs. Whatever that rule holds back
+     * (a cadet who still has time, work that came in after its zero) is named in the prompt, and
+     * not published.
+     */
+    async function doFinalize() {
+      const st = document.getElementById('save-status');
+      st.textContent = 'Checking what is due…';
+      const plan = await G.viewPublishPlan(ctx, {
+        offering: current, students: currentStudents, gradeMap: scoreMap, submissionMap, extensionMap });
+      st.textContent = '';
+      if (plan.error) { flash('⚠ Could not check what is due: ' + plan.error.message); return; }
+      const extras = G.finalizeExtras(plan.items, gradeData, effortData, staleIds);
+      const n = G.writableCount(ctx, current, currentStudents, gradeData, scoreMap, effortData, extras);
+      const held = heldSummary(extras.held);
+      if (!n) {
+        flash('Nothing to publish.' + (extras.held.length ? ` ${extras.held.length} held back — see the cards.` : ''));
+        return;
+      }
+      const secs = [...new Set(currentStudents.map(s => ctx.sectionCodeOf(s.section_id)))].sort();
+      const scope = secs.length === 1 ? `section ${secs[0]}` : `${secs.length} sections (${secs.join(', ')})`;
+      const z = extras.zeroItems.length;
+      if (!confirm(
+        `Publish ${n} grade${n === 1 ? '' : 's'} across ${scope}?` +
+        (z ? `\n\nThis includes ${z} zero${z === 1 ? '' : 's'} for cadets who handed in nothing by their deadline.` : '') +
+        (held ? `\n\n${held}` : '') +
+        `\n\nStudents will see their scores and feedback immediately.`)) return;
+      st.textContent = 'Publishing…';
+      const out = await G.finalizeScores(ctx, current, currentStudents, gradeData, scoreMap, effortData, extras);
+      const error = out.error;
+      st.textContent = error ? '⚠ Finalize failed: ' + error.message
+        : `✅ Published ${n} to students` + (extras.held.length ? ` · ${extras.held.length} held back` : '');
+      // Reload at once, and only after a publish that went through. A delayed reload left the old versions on screen
+      // for over a second, and a Save in that window was refused for the page's own publish. A failed publish keeps the
+      // page as it is, so typed work is not thrown away by a refusal.
+      // `out.data` is set only once the grades themselves were written (a later step may still have failed); a
+      // refusal before any write leaves it null, and the page stays as it is.
+      if (!error || out.data) await loadView();
+    }
+
+    /** The held-back part of the publish prompt: one line per reason, with its count. */
+    function heldSummary(held) {
+      if (!held.length) return '';
+      const by = {};
+      held.forEach(h => { by[h.reason] = (by[h.reason] || 0) + 1; });
+      return `${held.length} held back, not published:\n` + Object.entries(by)
+        .map(([r, c]) => `  • ${c} — ${G.PUBLISH_HOLDS[r] || r}`).join('\n');
+    }
+
+    function flash(msg) {
+      const st = document.getElementById('save-status');
+      st.textContent = msg;
+      setTimeout(() => { st.textContent = ''; }, 4000);
+    }
+    async function reopen(sid, name) {
+      if (!confirm(`Reopen grades for ${name}? Their scores are hidden until you re-finalize.`)) return;
+      const { error } = await G.reopenScore(ctx, current.offeringId, enrollmentOf[sid]);
+      if (error) { alert('Error reopening: ' + error.message); return; }
+      loadView();
+    }
+
+    /* ── The hand-grading queue (P1.14) ────────────────────────────────────────
+     * "What do I owe", per student, across every assignment — which the assignment-at-a-time
+     * view never could answer. Its scope is the sections you personally TEACH, not the ones you
+     * may see: a director reading a queue full of another instructor's ungraded work is reading
+     * a course status report, not a worklist, and stops opening it by week three.
+     *
+     * Nothing here grades automatically. It is a reminder, and the instructor grades those few
+     * by hand — one click puts the student's answers on screen with the 3-state controls.
+     */
+    const STATE_LABEL = {
+      ungraded: 'no grade yet', 'ai-only': 'AI suggested, unreviewed', draft: 'draft saved',
+    };
+
+    async function renderQueue() {
+      const { ids, narrowed } = actionableSections(ctx);
+      const rows = await G.gradingQueue(ctx, ids);
+      const wrap = document.getElementById('hq');
+      wrap.hidden = rows.length === 0;          // an empty queue costs nothing to ignore
+      document.getElementById('hq-count').textContent = rows.length;
+      document.getElementById('hq-scope').textContent =
+        narrowed ? '· your sections' : '· all sections you staff';
+      if (!rows.length) return;
+
+      document.getElementById('hq-cards').innerHTML = rows.map(r => `
+        <button type="button" class="hq-card ${r.reason === 'late' ? 'late' : 'ext'}"
+                data-act="queue-open" data-oid="${esc(r.offeringId)}" data-sid="${r.studentId}"
+                data-sec="${esc(r.sectionId)}"
+                title="${esc(r.reason === 'late'
+                  ? `Submitted ${lateBy(r.lateMs)} · ${r.title}`
+                  : `Extension ran out ${fmtDateTime(r.extendedDue)} · ${r.extensionReason}`)}">
+          <span class="hq-badge">${r.reason === 'late'
+            ? `⏰ ${esc(lateBy(r.lateMs))}` : `📅 extension over`}</span>
+          <span class="hq-name">${esc(lastFirst(r.studentName))}</span>
+          <span class="hq-meta">${esc(r.title)} · Sec ${esc(ctx.sectionCodeOf(r.sectionId))}</span>
+          <span class="hq-state ${esc(r.state)}">${esc(STATE_LABEL[r.state] || r.state)}</span>
+        </button>`).join('');
+    }
+
+    /**
+     * Open one queued student's work for grading, right here.
+     *
+     * Switching the assignment picker is what actually loads them — but the SECTION picker has to
+     * be widened first when the reader had narrowed to a single section that is not this student's.
+     * Otherwise the click loads an assignment scoped to the wrong section and the card it was meant
+     * to reveal is simply not in the DOM, which reads as the button being broken.
+     */
+    async function openQueued(offeringId, studentId, sectionId) {
+      const picked = secSel().value;
+      // '' (all my sections) and '__all__' (whole course) both already contain them.
+      const wrongSection = picked && picked !== '__all__' && picked !== sectionId;
+      if (asgnSel().value !== offeringId || wrongSection) {
+        // Same discard as a picker change, so it asks the same question. The queue is one click
+        // and lands you on a different assignment entirely — the easiest way in the whole page to
+        // lose a screen of unsaved work by accident.
+        const n = dirtyCount();
+        if (n && !confirm(`You have ${n} unsaved change${n === 1 ? '' : 's'} on screen.\n\n`
+                        + `Opening this student discards them. Continue?`)) return;
+        asgnSel().value = offeringId;
+        if (wrongSection) secSel().value = '';
+        await loadView();
+      }
+      const card = document.getElementById(`gc-${studentId}`);
+      if (!card) { flash('That student is not in the section currently selected.'); return; }
+      // Their card may be hidden by the status lamps — a queued student is exactly who the
+      // reader asked to see, so reveal it rather than scrolling to nothing.
+      card.style.display = '';
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('flash');
+      setTimeout(() => card.classList.remove('flash'), 1600);
+    }
+
+    // ── Extension modal ──
+    function wireExtModal() {
+      const m = document.getElementById('ext-modal');
+      wireModalDismiss(m, () => m.classList.remove('open'));
+      document.getElementById('ext-save').addEventListener('click', saveExt);
+    }
+
+    function wireQueue() {
+      // Delegated on #gq rather than on #main: the queue re-renders on every load, and one
+      // listener on the stable host survives that where per-card listeners would not.
+      document.getElementById('hq').addEventListener('click', (e) => {
+        const el = e.target.closest('[data-act="queue-open"]');
+        if (!el) return;
+        e.preventDefault();
+        openQueued(el.dataset.oid, el.dataset.sid, el.dataset.sec);
+      });
+    }
+    function openExt(sid, name) {
+      extSid = sid;
+      const ext = extensionMap[sid];
+      document.getElementById('ext-heading').textContent = ext ? 'Edit extension' : 'Grant extension';
+      document.getElementById('ext-name').textContent = name;
+      document.getElementById('ext-error').textContent = '';
+      document.getElementById('ext-reason').value = ext?.reason || '';
+      const existing = ext?.due || current?.dueAt;
+      const inp = document.getElementById('ext-due');
+      if (existing) {
+        const d = new Date(existing), pad = n => String(n).padStart(2, '0');
+        inp.value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      } else inp.value = '';
+      document.getElementById('ext-modal').classList.add('open');
+    }
+    async function saveExt() {
+      const val = document.getElementById('ext-due').value;
+      const reason = document.getElementById('ext-reason').value.trim();
+      const err = document.getElementById('ext-error');
+      if (!val) { err.textContent = 'Please select a date and time.'; return; }
+      // Enforced by a NOT NULL + CHECK in migration 007 too; caught here so the operator
+      // gets a sentence instead of a Postgres constraint name.
+      if (!reason) { err.textContent = 'A reason is required — your director sees it on the extensions report.'; return; }
+      const name = document.getElementById('ext-name').textContent;
+      const { error, reopened } = await G.setExtension(
+        ctx, current.offeringId, enrollmentOf[extSid], new Date(val).toISOString(), reason);
+      if (error) { err.textContent = 'Save failed: ' + error.message; return; }
+      document.getElementById('ext-modal').classList.remove('open');
+      // Say it rather than letting the row quietly lose its finalized state. The grade coming
+      // back down is what makes the extension work, but it also hides a score the student may
+      // already have seen — and it leaves a re-finalize owed, which is easy to forget.
+      if (reopened) alert(`Extension granted.\n\n${name} had a published grade, so it has been ` +
+                          `re-opened — otherwise the extension would not have let them back in. ` +
+                          `Their score is hidden until you finalize again.`);
+      loadView();
+    }
+    async function removeExt(sid, name) {
+      if (!confirm(`Remove the extension for ${name}?\n\nThey revert to the original due date. ` +
+                   `This erases the record of it — if you are pulling one back rather than ` +
+                   `correcting a mistake, your director should revoke it instead.`)) return;
+      const { error } = await G.removeExtension(current.offeringId, enrollmentOf[sid]);
+      if (error) {
+        // The DB refuses this once the student has committed work under the extension.
+        alert(/already submitted under it/i.test(error.message)
+          ? `${name} has already submitted under this extension, so it cannot be removed.\n\n` +
+            `Withdrawing it now would only turn an on-time submission into a late one. Grade the work.`
+          : 'Failed to remove extension: ' + error.message);
+        return;
+      }
+      loadView();
+    }
+
+  </script>
+</body>
+</html>

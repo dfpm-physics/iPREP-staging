@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js 'sha256-O1yQJpi2tk+FUEfwpxi0rUB9mwFk14n/BCfN/1plBv8=' 'sha256-XrJN0gC++fZidt0Szq7CyqlLZzK8sXjzyp2TJgtEpcM='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://wkibeptktbnaddfynrwr.supabase.co https://dfpm-physics.github.io; connect-src 'self' https://wkibeptktbnaddfynrwr.supabase.co wss://wkibeptktbnaddfynrwr.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Artifacts · PREP</title>
+  <script>(function(){try{var s=localStorage.getItem('cp.theme');var m=s||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(m==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <link rel="stylesheet" href="../css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O" crossorigin="anonymous"></script>
+  <script src="../js/config.js"></script>
+  <style>
+    /* Artifact-library components. Everything that already exists in the design system is REUSED
+     * (.stat-tile, .seg, .table-wrap, .alert, .tag, .btn, .card, .lesson-head, .feedback-block);
+     * only what has no equivalent is defined here, namespaced `al-`. Tokens only. */
+    .al-lede { color: var(--text-soft); max-width: 66ch; margin: 4px 0 20px; }
+
+    .al-list { border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--card); box-shadow: var(--shadow-sm); overflow: hidden; }
+    .al-head, .al-row { display: grid;
+      grid-template-columns: 54px minmax(170px, 2.1fr) minmax(128px, 1.05fr) 104px 138px 84px 88px;
+      gap: 14px; align-items: center; padding: 10px 16px; }
+    .al-head { background: var(--surface-sunken); border-bottom: 1px solid var(--border);
+      font-size: 0.7em; letter-spacing: 0.09em; text-transform: uppercase;
+      color: var(--muted); font-weight: 700; }
+    .al-row { width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
+      background: var(--card); border: 0; border-bottom: 1px solid var(--border); }
+    .al-row:last-child { border-bottom: 0; }
+    .al-row:hover { background: var(--surface-hover); }
+    .al-no { font-family: var(--font-display); font-weight: 600; font-size: 1.24em;
+      font-variant-numeric: tabular-nums; color: var(--muted); }
+    .al-row:hover .al-no { color: var(--blue-lt); }
+    /* The title/slug cell stacks. Both children were inline spans, so `margin-top` and the
+       ellipsis below did nothing and the slug ran straight on from the title with no gap —
+       "Energy, Atoms, and Nucleiphys310-atoms-and-nuclei-83022f32". They need block boxes;
+       `min-width: 0` is what lets the ellipsis engage inside a `minmax(0, 1fr)` grid column. */
+    .al-cell { display: block; min-width: 0; }
+    .al-ttl { display: block; font-weight: 600; line-height: 1.3;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .al-slug { display: block; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.7em; color: var(--muted); margin-top: 2px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .al-keys { display: flex; gap: 3px; align-items: center; flex-wrap: wrap; }
+    .al-key { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.66em; padding: 2px 6px; border-radius: 3px; background: var(--surface-sunken);
+      border: 1px solid var(--border); color: var(--text-soft);
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .al-key.drop { color: var(--muted); border-style: dashed; text-decoration: line-through; }
+    .al-shape { font-size: 0.8em; color: var(--text-soft); font-variant-numeric: tabular-nums; }
+    .al-shape em { font-style: normal; color: var(--muted); }
+
+    /* Backup build (detail rail). The list column needs no class of its own — it is a `.tag`,
+       like the Review column beside it. */
+    .al-bklinks { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 11px; }
+    .al-bkrouter { font-size: 0.78em; color: var(--muted); }
+    .al-bkrouter:hover { color: var(--blue-lt); }
+
+    /* pipeline: built → published → source archived → registered */
+    .al-pipe { display: flex; gap: 3px; align-items: center; }
+    .al-lamp { width: 18px; height: 7px; border-radius: 2px;
+      background: var(--lamp-off-bg); border: 1px solid var(--lamp-off-bd); }
+    .al-lamp.on   { background: var(--green); border-color: var(--green); }
+    .al-lamp.miss { background: var(--alert-error-bg); border-color: var(--red); border-style: dashed; }
+    .al-pipe .lbl { font-size: 0.7em; color: var(--muted); margin-left: 5px; white-space: nowrap; }
+
+    @media (max-width: 900px) {
+      .al-head, .al-row { grid-template-columns: 44px minmax(0, 1fr) 138px 76px 84px; gap: 10px; }
+      .al-head .c-keys, .al-head .c-shape, .al-row .al-keys, .al-row .al-shape { display: none; }
+    }
+    @media (max-width: 560px) {
+      .al-head, .al-row { grid-template-columns: 38px minmax(0, 1fr) 120px; }
+      .al-head .c-flag, .al-row .c-flag,
+      .al-head .c-backup, .al-row .c-backup { display: none; }
+    }
+
+    /* `.lesson-head` is designed to BLEED to the edge of a 24px-padded container — report.html,
+       its only other user, wraps it in `.report-rollup` and that is what its `margin: -24px -24px`
+       is measured against. Here it sits straight in `.page-wide`, whose padding is 20px, so the
+       tint overhung the page by 4px on each side and pulled its top edge up over the back button.
+       This class makes it a standalone card instead: no bleed, closed radius, a full border where
+       it otherwise has only `border-bottom`.
+
+       It is also a BLOCK, not a flex row — the flex row is `.lh-top`, which this page was not
+       using. Without it the topics badge could not sit beside the title however it was styled;
+       it stacked underneath and left-aligned, which is what made the header read as broken even
+       after the `.den` nesting was corrected. */
+    .al-headcard { margin: 0 0 20px; padding: 20px 22px 17px;
+      border: 1px solid var(--border); border-radius: 14px; }
+    .al-headcard .lh-title { font-size: 1.85em; }
+    .al-headcard .al-slugline { margin-top: 9px; }
+
+    .al-back { font: inherit; font-size: 0.85em; color: var(--muted); background: none;
+      border: 0; padding: 0; cursor: pointer; margin-bottom: 14px; }
+    .al-back:hover { color: var(--blue-lt); }
+    .al-slugline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      margin-top: 10px; font-size: 0.82em; color: var(--muted); }
+    .al-slugline code, .al-mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: var(--surface-sunken); border: 1px solid var(--border);
+      border-radius: 5px; padding: 2px 8px; color: var(--text); }
+    .al-cols { display: grid; grid-template-columns: minmax(0, 1fr) 318px; gap: 20px; align-items: start; }
+    @media (max-width: 980px) { .al-cols { grid-template-columns: minmax(0, 1fr); } }
+    .al-cols > div { min-width: 0; }
+    .al-rail { position: sticky; top: 16px; }
+    @media (max-width: 980px) { .al-rail { position: static; } }
+    .al-card-flush { padding: 0; overflow: hidden; }
+    .al-card-flush .al-cardhead { padding: 14px 18px; border-bottom: 1px solid var(--border);
+      background: var(--surface-sunken); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .al-card-flush .al-cardhead .card-title { margin: 0; }
+    .al-card-flush .al-cardhead .sub { font-size: 0.76em; color: var(--muted);
+      margin-left: auto; font-variant-numeric: tabular-nums; }
+    .al-cardbody { padding: 16px 18px; }
+
+    .al-dl > div { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 10px;
+      padding: 8px 18px; border-bottom: 1px solid var(--border); font-size: 0.84em; align-items: baseline; }
+    .al-dl > div:last-child { border-bottom: 0; }
+    .al-dl dt { color: var(--muted); font-size: 0.92em; }
+    .al-dl dd { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+    .al-dl dd.mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; }
+
+    .al-otable td code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.86em; background: var(--surface-sunken); border: 1px solid var(--border);
+      border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+    .al-otable tr.dropped td { color: var(--muted); }
+    .al-otable tr.dropped .olabel { text-decoration: line-through; }
+    .al-otable tr.dropped code { border-style: dashed; }
+
+    /* review controls */
+    .al-verdict { display: flex; gap: 6px; align-items: center; }
+    .al-verdict button { font: inherit; font-size: 0.78em; font-weight: 600; cursor: pointer;
+      padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border);
+      background: var(--surface-sunken); color: var(--text-soft); white-space: nowrap; }
+    .al-verdict button:hover:not(:disabled) { border-color: var(--blue-lt); color: var(--text); }
+    .al-verdict button:disabled { cursor: not-allowed; opacity: 0.5; }
+    .al-verdict button[aria-pressed="true"].ok   { background: var(--alert-ok-bg); color: var(--alert-ok-fg); border-color: var(--alert-ok-bd); }
+    .al-verdict button[aria-pressed="true"].no   { background: var(--alert-error-bg);   color: var(--red);   border-color: var(--red); }
+    .al-cmt { width: 100%; font: inherit; font-size: 0.84em; margin-top: 6px; padding: 6px 8px;
+      border: 1px solid var(--border); border-radius: 7px; background: var(--card);
+      color: var(--text); resize: vertical; min-height: 34px; }
+    .al-by { font-size: 0.72em; color: var(--muted); margin-top: 3px; }
+
+    .al-note { border-bottom: 1px solid var(--border); }
+    .al-note:last-child { border-bottom: 0; }
+    .al-note > summary { padding: 12px 18px; cursor: pointer; display: flex; gap: 10px;
+      align-items: flex-start; font-size: 0.88em; font-weight: 600; list-style: none; }
+    .al-note > summary::-webkit-details-marker { display: none; }
+    .al-note > summary::before { content: '▸'; color: var(--muted); font-size: 0.9em; line-height: 1.5; }
+    .al-note[open] > summary::before { content: '▾'; }
+    .al-note > summary:hover { background: var(--surface-hover); }
+    .al-note .tag { margin-left: auto; flex: none; }
+    .al-notebody { padding: 0 18px 15px 39px; font-size: 0.87em; color: var(--text-soft); max-width: 70ch;
+      white-space: pre-wrap; overflow-wrap: anywhere; }
+
+    .al-srcrow { display: grid; grid-template-columns: minmax(0, 1fr) 74px 60px; gap: 10px;
+      align-items: center; padding: 8px 18px; border: 0; border-bottom: 1px solid var(--border);
+      width: 100%; text-align: left; font: inherit; font-size: 0.84em; color: inherit;
+      background: transparent; cursor: pointer; }
+    .al-srcrow:last-of-type { border-bottom: 0; }
+    .al-srcrow:hover { background: var(--surface-hover); }
+    .al-srcrow[aria-pressed="true"] { background: var(--mc-sel-bg); }
+    .al-srcrow .nm { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .al-srcrow .nm.key { color: var(--blue-lt); font-weight: 600; }
+    .al-srcrow .ln { color: var(--muted); font-size: 0.86em; font-variant-numeric: tabular-nums; text-align: right; }
+    .al-srcrow .bar { height: 4px; border-radius: 2px; background: var(--blue-lt); opacity: 0.32; min-width: 2px; display: block; }
+    pre.al-code { margin: 0; padding: 14px 18px; overflow-x: auto; background: var(--surface-sunken);
+      border-top: 1px solid var(--border); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px; line-height: 1.6; color: var(--text-soft); tab-size: 2; max-height: 60vh; }
+
+    /* register panel */
+    .al-reg input[type=url], .al-reg textarea { width: 100%; font: inherit; font-size: 0.85em;
+      padding: 7px 9px; border: 1px solid var(--border); border-radius: 7px;
+      background: var(--card); color: var(--text); }
+    .al-reg textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.78em; min-height: 76px; resize: vertical; }
+    .al-linkout { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.72em; word-break: break-all; background: var(--surface-sunken);
+      border: 1px solid var(--border); border-radius: 7px; padding: 8px 10px; color: var(--text-soft); }
+    .al-match { display: grid; grid-template-columns: 84px minmax(0,1fr); gap: 6px 10px;
+      font-size: 0.78em; align-items: baseline; margin: 8px 0; }
+    .al-match dt { color: var(--muted); }
+    .al-match dd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      overflow-wrap: anywhere; }
+
+    .al-foot { margin-top: 30px; padding-top: 16px; border-top: 1px solid var(--border);
+      font-size: 0.8em; color: var(--muted); max-width: 74ch; }
+    .al-foot b { color: var(--text-soft); }
+  </style>
+</head>
+<body>
+  <header id="topnav"></header><script src="../js/nav-shell.js"></script>
+  <main class="page-wide" id="main">
+    <div class="center-load"><span class="spinner"></span><span>Loading the artifact library…</span></div>
+  </main>
+
+  <script type="module">
+    import { bootstrap } from '../js/auth.js';
+    import { renderNav } from '../js/nav.js';
+    import { initTheme } from '../js/theme.js';
+    import { runPage, esc, iconHTML, triggerDownload } from '../js/util.js';
+    import * as AL from '../js/faculty-artifacts.js';
+
+    const ctx = await bootstrap({ require: 'faculty' });
+    runPage(ctx, init);
+
+    const main = document.getElementById('main');
+    const state = {
+      course: AL.BUILDER_COURSES[0],
+      index: null,        // the loaded index.json
+      reviews: null,      // review-notes.json for that course
+      registered: new Map(),
+      backups: { builds: {}, error: null },   // site/data/backup-builds.json (all courses)
+      genai: { builds: {}, error: null },     // site/data/genai-builds.json (staff-only list)
+      filter: 'all',
+      slug: null,         // null = library view
+      build: null, source: null, outline: null, block: null,
+    };
+
+    // Reviewing is an authoring act (CORE.md §6) and the Storage policy enforces it. The UI
+    // mirrors the boundary rather than defining it — a non-director sees the decisions and
+    // cannot change them.
+    const canReview = () => !!ctx.isDirectorForCurrent?.() || !!ctx.instructorRow?.is_global_admin;
+    const reviewer = () => ctx.instructorRow?.name || 'unknown';
+
+    async function init() {
+      initTheme();
+      renderNav(ctx, { active: 'artifacts' });
+      // Which shelves exist is read from Storage, not compiled in (faculty-artifacts.js).
+      // Before `load()`, because `state.course` was seeded from the fallback list at module
+      // scope and the first render must not ask for a course this bucket does not have.
+      const courses = await AL.loadBuilderCourses();
+      if (!courses.includes(state.course)) state.course = courses[0];
+      await load();
+    }
+
+    async function load() {
+      // Outside the try on purpose. The Gemini backup manifest is an annotation on the library,
+      // not part of it — a fetch that fails must show as "availability unknown", never as "the
+      // artifact library is not reachable". `loadBackups()` never rejects; it reports.
+      state.backups = await AL.loadBackups();
+      state.genai = await AL.loadGenaiBuilds();
+      try {
+        state.index = await AL.loadIndex(state.course);
+        state.reviews = await AL.loadReviews(state.course);
+        state.registered = await AL.registeredSlugs(state.index.artifacts.map((a) => a.slug));
+      } catch (err) {
+        main.innerHTML = `
+          <div class="page-head"><h1>Artifacts</h1></div>
+          <div class="alert alert-error"><div>
+            <b>The artifact library is not reachable.</b><br>${esc(err.message)}<br><br>
+            The sources live in the private <code>artifact-sources</code> Storage bucket. Reading it
+            needs a staff account and migration&nbsp;023 applied. Note that Storage answers
+            <code>NoSuchBucket</code> for a denied request and a mistyped path alike.
+          </div></div>`;
+        return;
+      }
+      render();
+    }
+
+    function render() { state.slug ? renderDetail() : renderLibrary(); }
+
+    // ── library ──────────────────────────────────────────────────────────────
+
+    function lamps(a) {
+      const reg = state.registered.has(a.slug);
+      const steps = [
+        ['built', !!a.built || !!a.lines],
+        ['published', !!a.published_url],
+        ['archived', !!a.sha256],
+        ['registered', reg],
+      ];
+      const done = steps.filter(([, on]) => on).length;
+      return `<span class="al-pipe" title="built · published · source archived · registered">${
+        steps.map(([, on], i) => `<span class="al-lamp ${on ? 'on' : (i === 3 ? 'miss' : '')}"></span>`).join('')
+      }<span class="lbl">${done}/4</span></span>`;
+    }
+
+    function renderLibrary() {
+      const arts = state.index.artifacts;
+      const pub = arts.filter((a) => a.published_url).length;
+      const reg = arts.filter((a) => state.registered.has(a.slug)).length;
+      const reviewed = arts.filter((a) => state.reviews.artifacts?.[a.slug]?.objectives).length;
+      // Backup availability. The tile below keeps the neutral blue accent whatever these counts
+      // are: an artifact with no Gemini backup is not a fault the way an unregistered published
+      // artifact is, so it never turns red.
+      //
+      // The two absences are not the same thing and the sub-line must not merge them. An
+      // UNPUBLISHED artifact has nothing to back up — that is most of phys-310 and it is a
+      // decision, not a gap. A PUBLISHED one without a backup is the case worth naming: cadets
+      // can reach it, so a cadet that claude.ai turns away has nowhere to go.
+      const bk = arts.filter((a) => AL.backupFor(state.backups, a.slug)).length;
+      const bkGap = arts.filter((a) => a.published_url && !AL.backupFor(state.backups, a.slug)).length;
+      const shown = arts.filter((a) =>
+        state.filter === 'all' ? true
+        : state.filter === 'unregistered' ? !state.registered.has(a.slug)
+        : state.filter === 'unreviewed' ? !state.reviews.artifacts?.[a.slug]?.objectives
+        : state.filter === 'nobackup' ? !AL.backupFor(state.backups, a.slug)
+        : !a.published_url);
+
+      main.innerHTML = `
+        <div class="page-head"><h1>Artifacts</h1></div>
+        <p class="al-lede">Every interactive lesson this department has built, and what went into
+          it — the objectives it probes, the pages it was grounded in, and the JSX itself. Sources
+          live in Supabase, not in the repo.</p>
+
+        <div class="stat-grid">
+          ${tile('blue', 'interactions', '🧪', arts.length, 'Built', 'interactive lessons')}
+          ${tile('green', 'done', '🚀', pub, 'Published',
+                 pub === arts.length ? 'all of them' : `${arts.length - pub} still unpublished`)}
+          ${tile('gold', 'analytics', '🔎', reviewed, 'Reviewed',
+                 `${arts.length - reviewed} not yet judged`)}
+          ${tile(reg < arts.length ? 'red' : 'green', reg < arts.length ? 'warning' : 'done',
+                 reg < arts.length ? '🚩' : '✅', reg, 'Registered',
+                 reg < arts.length ? `${arts.length - reg} unreachable by cadets` : 'all reachable')}
+          ${tile('blue', 'bolt', '🛟', state.backups.error ? '?' : bk, 'Backup builds',
+                 state.backups.error ? 'list could not be read'
+                 : bk === arts.length ? 'every artifact has one'
+                 : bkGap ? `${bkGap} published without one`
+                 : `${arts.length - bk} unpublished, none needed`)}
+        </div>
+
+        ${reg < pub ? `<div class="alert alert-warn"><div>
+          <b>${pub - reg} published artifact${pub - reg === 1 ? ' has' : 's have'} no lesson row.</b>
+          A published artifact is a live URL, but until a lesson exists with the matching slug no
+          cadet can reach it through the course site — and a cadet who reaches it another way
+          submits work that lands nowhere, with no error. Open one and use <b>Register</b>.
+        </div></div>` : ''}
+
+        <div class="toolbar">
+          <div class="seg" role="group" aria-label="Course">
+            ${AL.BUILDER_COURSES.map((c) => `<button aria-pressed="${c === state.course}" data-course="${c}">${esc(c)}</button>`).join('')}
+          </div>
+          <div class="seg" role="group" aria-label="Filter">
+            ${[['all', `All ${arts.length}`], ['unregistered', 'Not registered'],
+               ['unreviewed', 'Not reviewed'], ['draft', 'Unpublished'], ['nobackup', 'No backup']]
+              .map(([k, l]) => `<button aria-pressed="${k === state.filter}" data-filter="${k}">${esc(l)}</button>`).join('')}
+          </div>
+        </div>
+
+        <div class="al-list">
+          <div class="al-head">
+            <span>#</span><span>Lesson</span><span class="c-keys">Objectives</span>
+            <span class="c-shape">Shape</span><span>Pipeline</span>
+            <span class="c-backup">Backup</span><span class="c-flag">Review</span>
+          </div>
+          ${shown.map(rowHTML).join('') || '<div class="al-cardbody"><span class="muted">Nothing matches this filter.</span></div>'}
+        </div>
+
+        <p class="al-foot"><b>${esc(state.index.course_title || state.course)}.</b>
+          Sources are read from the private <code>artifact-sources</code> bucket; the
+          <b>registered</b> lamp is a live read of <code>activities</code>. Nothing on this page
+          writes to the gradebook.
+          <br><b>Gemini build</b> is the page cadets actually get. Since 2026-08-21 it is the
+          DEFAULT path, not a fallback — free-tier Claude was timing cadets out mid-lesson, so
+          the lesson pages launch this and the Claude artifact is offered only where no Gemini
+          build exists yet. It submits under the same slug, so its report lands in this
+          artifact's activity row and rolls up identically. An artifact never published on
+          claude.ai has none by design. Builds are regenerated with
+          <code>scripts/artifacts/to_gemini.py</code>, never hand-edited.
+          ${state.backups.error ? `<br><b>The backup list could not be read</b>
+            (${esc(state.backups.error)}), so the Backup column says <code>?</code> rather than
+            guessing.` : ''}</p>`;
+
+      main.querySelectorAll('[data-course]').forEach((b) => b.onclick = async () => {
+        state.course = b.dataset.course; state.slug = null; await load();
+      });
+      main.querySelectorAll('[data-filter]').forEach((b) => b.onclick = () => {
+        state.filter = b.dataset.filter; render();
+      });
+      main.querySelectorAll('.al-row').forEach((b) => b.onclick = () => open(b.dataset.slug));
+    }
+
+    const tile = (accent, icon, emoji, n, label, sub) => `
+      <div class="stat-tile accent-${accent}">
+        <div class="stat-ic">${iconHTML(icon, emoji, 'ic')}</div>
+        <div class="stat-body"><div class="stat-num">${n}</div>
+          <div class="stat-label">${esc(label)}</div>
+          <div class="stat-sub">${esc(sub)}</div></div>
+      </div>`;
+
+    // The Backup column is a tag, never a link — `.al-row` IS a <button>, and an anchor nested
+    // inside one is invalid HTML that would also fire the row's own click on the way out. The
+    // links live on the artifact's page, one click away.
+    //
+    // An unreadable manifest must render as UNKNOWN and not as absence: "—" on every row would
+    // turn one failed fetch into a column of confident, wrong claims about cadet fallbacks.
+    function backupTag(a) {
+      if (state.backups.error) {
+        return '<span class="tag" title="The backup list could not be read, so availability is'
+          + ' unknown.">?</span>';
+      }
+      const b = AL.backupFor(state.backups, a.slug);
+      const g = AL.backupFor(state.genai, a.slug);
+      const gTag = g
+        ? ` <span class="tag gold" title="GenAI.mil build — staff only, not shown to cadets · ${esc(g.path)}">GenAI</span>`
+        : '';
+      return (b
+        ? `<span class="tag blue" title="Gemini build — what cadets are launched into · ${esc(b.path)}">Gemini</span>`
+        : '<span class="tag" title="No Gemini build, so this lesson still launches the Claude'
+          + ' artifact. An artifact that was never published on claude.ai has none by design.">—</span>') + gTag;
+    }
+
+    function rowHTML(a) {
+      const rev = state.reviews.artifacts?.[a.slug];
+      const nRej = rev ? Object.values(rev.objectives || {}).filter((o) => o.decision === 'rejected').length : 0;
+      const flag = !rev ? '<span class="tag">—</span>'
+        : nRej ? `<span class="tag gold">${nRej} rejected</span>`
+        : '<span class="tag green">accepted</span>';
+      return `
+        <button class="al-row" data-slug="${esc(a.slug)}" data-n="${a.lesson_no ?? ''}">
+          <span class="al-no">${a.lesson_no ?? '–'}</span>
+          <span class="al-cell"><span class="al-ttl">${esc(a.title)}</span><span class="al-slug">${esc(a.slug)}</span></span>
+          <span class="al-keys">${(a.objectives || []).slice(0, 4).map((o) =>
+            `<span class="al-key" title="${esc(o.label)}">${esc(o.key)}</span>`).join('')}
+            ${(a.dropped || []).map((o) => `<span class="al-key drop" title="dropped on review">${esc(o.key)}</span>`).join('')}</span>
+          <span class="al-shape">${a.topic_count} × <em>~${esc(a.budget)} min</em></span>
+          <span>${lamps(a)}</span>
+          <span class="c-backup">${backupTag(a)}</span>
+          <span class="c-flag">${flag}</span>
+        </button>`;
+    }
+
+    // ── detail ───────────────────────────────────────────────────────────────
+
+    async function open(slug) {
+      state.slug = slug; state.build = null; state.source = null; state.outline = null; state.block = null;
+      main.innerHTML = '<div class="center-load"><span class="spinner"></span><span>Loading the build record…</span></div>';
+      try {
+        state.build = await AL.loadBuild(state.course, slug);
+      } catch (err) {
+        main.innerHTML = `<div class="alert alert-error"><div>${esc(err.message)}</div></div>`;
+        return;
+      }
+      renderDetail();
+    }
+
+    function renderDetail() {
+      const a = state.index.artifacts.find((x) => x.slug === state.slug);
+      const b = state.build;
+      const art = b.artifact || {};
+      const log = b.build_log || {};
+      const meta = log.meta || {};
+      const rev = state.reviews.artifacts?.[state.slug] || {};
+      const reg = state.registered.get(state.slug);
+      const dropped = new Map((log.objectives || []).filter((o) => o.dropped).map((o) => [o.key, o]));
+
+      // The topics badge: `.den` nests INSIDE `.num`, and the block needs `emph` — that is the
+      // shape the shared style expects (see report.html's completion badge and the
+      // `.comp-block.emph .num .den` rule). As siblings on a `flex-direction: column` block the
+      // count was orphaned onto its own line above the words, which made a plain "3 topics"
+      // render as a floating hero number.
+      //
+      // This note lives out here, in a JS comment, and not in an HTML comment inside the
+      // template below. Backticks are how this repository writes about code, and a backtick
+      // inside a template literal ENDS it: the first draft of this note closed the string at
+      // `emph`, the module failed to parse, and the page sat on its loading spinner forever with
+      // one SyntaxError in the console. A comment in the markup also ships to the DOM on every
+      // render, which is a second reason not to put one there.
+      main.innerHTML = `
+        <button class="al-back" id="back">← All artifacts</button>
+        <div class="lesson-head al-headcard">
+          <div class="lh-top">
+            <h2 class="lh-title grow">${esc(a.title)}</h2>
+            <div class="comp-block emph"><span class="num">${a.topic_count}<span class="den">
+              topics · ~${esc(a.budget)} min each</span></span></div>
+          </div>
+          <div class="lh-sub">
+            <div class="hflags grow">
+              ${a.published_url ? '<span class="tag green">Published</span>' : '<span class="tag">Unpublished</span>'}
+              ${reg ? '<span class="tag blue">Registered</span>' : '<span class="tag gold">Not registered</span>'}
+            </div>
+          </div>
+          <div class="al-slugline"><span>slug</span><code>${esc(state.slug)}</code>
+            <span>·</span><span>${art.lines || '?'} lines</span>
+            <span>·</span><span>${art.component || ''}</span></div>
+        </div>
+
+        <div class="al-cols">
+          <div>
+            ${objectivesCard(art, rev, dropped)}
+            ${notesCard(log)}
+            ${sourceCard()}
+          </div>
+          <div class="al-rail">
+            ${registerCard(a, art, reg)}
+            ${backupCard(state.slug)}
+            ${genaiCard(state.slug)}
+            ${builtFromCard(meta, art)}
+          </div>
+        </div>`;
+
+      document.getElementById('back').onclick = () => { state.slug = null; render(); };
+      wireReview(art, dropped);
+      wireRegister(a, art);
+      wireSource(art);
+    }
+
+    function objectivesCard(art, rev, dropped) {
+      const rows = (art.objectives || []).map((o) => {
+        const d = rev.objectives?.[o.key] || {};
+        const stale = d.sha && d.sha !== o.sha;
+        return `
+          <tr data-key="${esc(o.key)}">
+            <td>${o.n}</td>
+            <td><code>${esc(o.key)}</code></td>
+            <td class="olabel">${esc(o.label)}
+              ${stale ? '<span class="tag gold" title="the prose moved since this was judged">stale</span>' : ''}</td>
+            <td>
+              <span class="al-verdict">
+                <button class="ok" data-v="accepted" aria-pressed="${d.decision === 'accepted'}" ${canReview() ? '' : 'disabled'}>Accept</button>
+                <button class="no" data-v="rejected" aria-pressed="${d.decision === 'rejected'}" ${canReview() ? '' : 'disabled'}>Reject</button>
+              </span>
+              ${d.decision ? `<textarea class="al-cmt" placeholder="Why?" ${canReview() ? '' : 'disabled'}>${esc(d.comment || '')}</textarea>
+                <div class="al-by">${esc(d.by || 'reviewed on this page')}</div>` : ''}
+            </td>
+          </tr>`;
+      }).join('');
+      const dropRows = [...dropped.values()].map((o) => `
+        <tr class="dropped"><td>${o.n}</td><td><code>${esc(o.key)}</code></td>
+          <td class="olabel">${esc(o.label)}</td>
+          <td><span class="muted">${esc(o.note || 'dropped on review')}</span></td></tr>`).join('');
+
+      return `
+        <div class="card al-card-flush">
+          <div class="al-cardhead"><span class="card-title">Objectives</span>
+            <span class="sub">${(art.objectives || []).length} probed${dropped.size ? ` · ${dropped.size} dropped` : ''}</span></div>
+          ${canReview() ? '' : '<div class="al-cardbody"><span class="muted">Review is a director action. You can see the decisions but not change them.</span></div>'}
+          ${state.saveError ? `<div class="al-cardbody"><div class="alert alert-error" style="margin:0"><div>
+            <b>That decision was not saved.</b><br>${esc(state.saveError)}</div></div></div>` : ''}
+          <div class="table-wrap"><table class="al-otable">
+            <thead><tr><th>#</th><th>Key</th><th>What it probes</th><th>Verdict</th></tr></thead>
+            <tbody>${rows}${dropRows}</tbody>
+          </table></div>
+          <div class="al-cardbody"><span class="muted">A rejection is an instruction for a later
+            edit, never the edit. ${state.index.artifacts.find((x) => x.slug === state.slug)?.published_url
+            ? '<b>This artifact is published</b> — applying a note means rebuilding, which mints a new 8-hex slug and registers as a NEW lesson row.' : ''}</span></div>
+        </div>`;
+    }
+
+    function notesCard(log) {
+      const outs = log.callouts || [];
+      if (!outs.length) return '';
+      return `
+        <div class="card al-card-flush" style="margin-top:18px">
+          <div class="al-cardhead"><span class="card-title">The review written at build time</span>
+            <span class="sub">${outs.length} note${outs.length === 1 ? '' : 's'}</span></div>
+          ${outs.map((c) => `<details class="al-note">
+            <summary>${esc(c.title || 'note')}</summary>
+            <div class="al-notebody">${esc(c.body)}</div></details>`).join('')}
+        </div>`;
+    }
+
+    // The sub-label was "not loaded", which reads as "this file is missing" standing next to a
+    // button offering to load it — the source is in Storage and downloads fine; it is simply
+    // fetched on demand because a .jsx runs 100–250 KB. Say that instead.
+    function sourceCard() {
+      return `
+        <div class="card al-card-flush" style="margin-top:18px" id="srccard">
+          <div class="al-cardhead"><span class="card-title">Source</span>
+            <span class="sub" id="srcsub">fetched on demand</span>
+            <button class="btn btn-sm" id="dlsrc">Download .jsx</button>
+            <button class="btn btn-sm" id="loadsrc">Read it here</button></div>
+          <div id="srcbody"></div>
+        </div>`;
+    }
+
+    // The Gemini backup for this artifact. A small rail card, deliberately: the Claude artifact
+    // is what this page is about and the backup is one fact about it. Both links open in a new
+    // tab so the library keeps its place — and the second one is the cadet's own route in, which
+    // is the only way to see what a cadet is actually shown before they see it.
+    function backupCard(slug) {
+      const head = '<div class="al-cardhead"><span class="card-title">Backup build</span></div>';
+      const card = (inner) =>
+        `<div class="card al-card-flush" style="margin-top:18px">${head}${inner}</div>`;
+
+      if (state.backups.error) {
+        return card(`<div class="al-cardbody"><span class="muted">Whether this lesson has a
+          backup is unknown here — <code>site/data/backup-builds.json</code> could not be read
+          (${esc(state.backups.error)}).</span></div>`);
+      }
+      const b = AL.backupFor(state.backups, slug);
+      if (!b) {
+        return card(`<div class="al-cardbody"><span class="muted">None, which is the ordinary
+          state for an artifact that was never published on claude.ai — there is nothing to back
+          up. A backup is generated per published artifact with
+          <code>scripts/artifacts/to_gemini.py</code>.</span></div>`);
+      }
+      return card(`
+        <dl class="al-dl">
+          <div><dt>Lesson</dt><dd>${b.lessonNo == null ? '—' : esc(String(b.lessonNo))}${
+            b.title ? ` · ${esc(b.title)}` : ''}</dd></div>
+          <div><dt>File</dt><dd class="mono">${esc(b.path)}</dd></div>
+        </dl>
+        <div class="al-cardbody">
+          <span class="muted">The same lesson on Google Gemini, run with the cadet's own free API
+            key. Since 2026-08-21 this is the page cadets are launched into by default, not a
+            fallback. It submits under <b>this same slug</b>, so its reports land in this
+            artifact's activity row and roll up identically. Regenerated, never hand-edited.</span>
+          <div class="al-bklinks">
+            <a class="btn btn-sm" href="${esc(b.url)}" target="_blank" rel="noopener">Open the backup</a>
+            <a class="al-bkrouter" href="${esc(b.router)}" target="_blank" rel="noopener">What a cadet sees →</a>
+          </div>
+        </div>`);
+    }
+
+    // The GenAI.mil build, when there is one. No card at all when there is not: unlike the
+    // Gemini backup, its absence says nothing about the artifact.
+    function genaiCard(slug) {
+      const g = AL.backupFor(state.genai, slug);
+      if (!g) return '';
+      return `<div class="card al-card-flush" style="margin-top:18px">
+        <div class="al-cardhead"><span class="card-title">GenAI.mil build</span></div>
+        <dl class="al-dl">
+          <div><dt>File</dt><dd class="mono">${esc(g.path)}</dd></div>
+        </dl>
+        <div class="al-cardbody">
+          <span class="muted">The same lesson on GenAI.mil, run with the course key, which the
+            <code>genai-mil-proxy</code> edge function holds. <b>Staff only for now</b>: cadets are
+            not shown this link, and the function refuses them. You must be signed in to PREP in
+            this browser. Submits under <b>this same slug</b>.</span>
+          <div class="al-bklinks">
+            <a class="btn btn-sm" href="${esc(g.url)}" target="_blank" rel="noopener">Open the GenAI.mil build</a>
+          </div>
+        </div></div>`;
+    }
+
+    function builtFromCard(meta, art) {
+      const rows = [
+        ['Grounding', meta.Grounding || art.grounding],
+        ['Source PDF', meta['Source PDF']],
+        ["Cadets' reading", meta["Cadets' reading"]],
+        ['Built', meta.Built],
+        ['Checks', meta.Checks],
+        ['Models', (art.models || []).join(', ')],
+      ].filter(([, v]) => v);
+      return `
+        <div class="card al-card-flush" style="margin-top:18px">
+          <div class="al-cardhead"><span class="card-title">Built from</span></div>
+          <dl class="al-dl">${rows.map(([k, v]) =>
+            `<div><dt>${esc(k)}</dt><dd>${esc(String(v))}</dd></div>`).join('')}</dl>
+        </div>`;
+    }
+
+    // ── 5b: register ─────────────────────────────────────────────────────────
+
+    function registerCard(a, art, reg) {
+      const base = state.index.prefill_base;
+      return `
+        <div class="card al-card-flush al-reg">
+          <div class="al-cardhead"><span class="card-title">Register</span></div>
+          <div class="al-cardbody">
+            ${reg ? `<div class="alert alert-success" style="margin:0 0 10px"><div>
+                Already registered as <code>${esc(reg.assignments?.slug || reg.slug)}</code>.</div></div>` : ''}
+            <label for="puburl" style="display:block;font-size:.8em;color:var(--muted);margin-bottom:4px">Published artifact URL</label>
+            <input type="url" id="puburl" placeholder="https://claude.ai/public/artifacts/…"
+                   value="${esc(a.published_url || '')}">
+            <dl class="al-match">
+              <dt>slug in source</dt><dd id="m-src">${esc(art.slug || '')}</dd>
+              <dt>id in link</dt><dd id="m-link">—</dd>
+            </dl>
+            <div class="alert alert-info" style="margin:0 0 10px"><div>
+              The <code>id</code> is read out of the artifact, never typed. If it differs from the
+              artifact's <code>#i=</code>, every cadet report is discarded with no error anywhere.
+            </div></div>
+            <div id="linkout"></div>
+            <div style="display:flex;gap:8px;margin-top:10px">
+              <button class="btn btn-sm" id="copylink" disabled>Copy link</button>
+              <a class="btn btn-sm btn-primary" id="openlink" style="pointer-events:none;opacity:.5">Open in Assignments</a>
+            </div>
+            ${base ? '' : '<p class="muted" style="font-size:.8em">No <code>prefill_base</code> in this course profile.</p>'}
+          </div>
+        </div>`;
+    }
+
+    function wireRegister(a, art) {
+      const url = document.getElementById('puburl');
+      if (!url) return;
+      const out = document.getElementById('linkout');
+      const copy = document.getElementById('copylink');
+      const open_ = document.getElementById('openlink');
+      const mlink = document.getElementById('m-link');
+
+      const update = async () => {
+        const v = url.value.trim();
+        const ok = AL.ARTIFACT_URL_RE.test(v);
+        const link = ok ? AL.prefillLink({
+          base: state.index.prefill_base, slug: art.slug, courseId: state.index.course_id,
+          title: a.title, url: v, lessonNo: a.lesson_no,
+        }) : '';
+        mlink.textContent = ok ? art.slug : '—';
+        out.innerHTML = !v ? ''
+          : !ok ? '<div class="alert alert-warn" style="margin:0"><div>That is not a claude.ai public artifact URL.</div></div>'
+          : `<div class="al-linkout">${esc(link)}</div>`;
+        copy.disabled = !link;
+        open_.href = link || '#';
+        open_.style.pointerEvents = link ? '' : 'none';
+        open_.style.opacity = link ? '' : '.5';
+        copy.onclick = async () => {
+          await navigator.clipboard.writeText(link);
+          copy.textContent = 'Copied'; setTimeout(() => copy.textContent = 'Copy link', 1400);
+        };
+        // Persist a URL the library did not already know, so the next visitor sees it too.
+        if (ok && canReview() && v !== a.published_url) {
+          try {
+            state.index = await AL.recordPublishedUrl(state.course, art.slug, v);
+            a.published_url = v;
+          } catch { /* the link still works; persisting is a convenience */ }
+        }
+      };
+      url.addEventListener('change', update);
+      update();
+    }
+
+    // ── 5a: review wiring ────────────────────────────────────────────────────
+
+    function wireReview(art, dropped) {
+      if (!canReview()) return;
+      main.querySelectorAll('.al-otable tbody tr[data-key]').forEach((tr) => {
+        const key = tr.dataset.key;
+        const obj = (art.objectives || []).find((o) => o.key === key);
+        tr.querySelectorAll('.al-verdict button').forEach((btn) => {
+          btn.onclick = async () => {
+            const decision = btn.dataset.v;
+            await commit(AL.objectiveDecision({
+              slug: state.slug, key, label: obj.label, sha: obj.sha, decision,
+              comment: tr.querySelector('.al-cmt')?.value || '', by: reviewer(), file: art.file,
+            }));
+          };
+        });
+        const cmt = tr.querySelector('.al-cmt');
+        if (cmt) cmt.onchange = async () => {
+          const d = state.reviews.artifacts?.[state.slug]?.objectives?.[key];
+          if (!d) return;
+          await commit(AL.objectiveDecision({
+            slug: state.slug, key, label: obj.label, sha: obj.sha, decision: d.decision,
+            comment: cmt.value, by: reviewer(), file: art.file,
+          }));
+        };
+      });
+    }
+
+    async function commit(mutator) {
+      try {
+        state.reviews = await AL.saveReview(state.course, mutator);
+        state.saveError = null;
+      } catch (err) {
+        // Never alert(). A native dialog blocks the page thread, which turns a failed save into
+        // an apparently frozen tab — and it cannot say what to do next. The message goes inline,
+        // above the objectives, where the decision that failed is still on screen.
+        state.saveError = err.message;
+      }
+      renderDetail();
+    }
+
+    // ── source browser ───────────────────────────────────────────────────────
+
+    /** Fetch the .jsx once and keep it — both buttons want the same bytes. */
+    async function source() {
+      if (state.source == null) state.source = await AL.loadSource(state.course, state.slug);
+      return state.source;
+    }
+
+    const srcFail = (err) => {
+      document.getElementById('srcbody').innerHTML =
+        `<div class="al-cardbody"><span class="muted">${esc(err.message)}</span></div>`;
+    };
+
+    function wireSource(art) {
+      // Download is the step that connects this page to PUBLISH-ARTIFACT.md: publishing means
+      // attaching this exact .jsx to a claude.ai session, and the file is gitignored, so a
+      // director whose machine never ran `sync_artifacts.py pull` has no other copy of it.
+      // The name comes from the build record and is never re-derived — the slug inside the file
+      // is the artifact's identity (contract §3.2) and this page exists partly to stop that
+      // being retyped.
+      const dl = document.getElementById('dlsrc');
+      if (dl) dl.onclick = async () => {
+        const name = art?.file || `${state.slug}.jsx`;
+        dl.disabled = true; dl.textContent = 'Fetching…';
+        try {
+          // text/plain, not text/jsx: no browser knows the latter, and an unknown type is what
+          // makes Chrome ask "keep or discard?" on an otherwise ordinary download.
+          triggerDownload(await source(), name, 'text/plain;charset=utf-8');
+          dl.textContent = `Saved ${name}`;
+        } catch (err) {
+          dl.textContent = 'Download .jsx';
+          srcFail(err);
+        }
+        dl.disabled = false;
+      };
+
+      const btn = document.getElementById('loadsrc');
+      if (!btn) return;
+      btn.onclick = async () => {
+        btn.disabled = true; btn.textContent = 'Loading…';
+        try {
+          state.outline = AL.sourceOutline(await source());
+          drawSource();
+        } catch (err) {
+          btn.disabled = false; btn.textContent = 'Read it here';
+          srcFail(err);
+        }
+      };
+    }
+
+    function drawSource() {
+      const lines = state.source.split('\n');
+      const max = Math.max(...state.outline.map((b) => b.lines));
+      document.getElementById('srcsub').textContent = `${lines.length} lines · ${state.outline.length} blocks`;
+      // Only present on the first draw — this redraws on every block click, and an unguarded
+      // .remove() threw on the second one, which killed the redraw and made clicking a block
+      // silently do nothing.
+      document.getElementById('loadsrc')?.remove();
+      document.getElementById('srcbody').innerHTML =
+        state.outline.map((b, i) => `
+          <button class="al-srcrow" data-i="${i}" aria-pressed="${state.block === i}">
+            <span class="nm${AL.KEY_BLOCKS.has(b.name) ? ' key' : ''}">${esc(b.name)}</span>
+            <span class="bar" style="width:${Math.max(2, Math.round(70 * b.lines / max))}px"></span>
+            <span class="ln">${b.lines}</span>
+          </button>`).join('')
+        + (state.block == null ? '' :
+          `<pre class="al-code">${esc(lines.slice(state.outline[state.block].start - 1,
+                                                  state.outline[state.block].end).join('\n'))}</pre>`);
+      document.querySelectorAll('.al-srcrow').forEach((b) => b.onclick = () => {
+        state.block = state.block === +b.dataset.i ? null : +b.dataset.i; drawSource();
+      });
+    }
+  </script>
+</body>
+</html>

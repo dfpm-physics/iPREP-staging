@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js 'sha256-O1yQJpi2tk+FUEfwpxi0rUB9mwFk14n/BCfN/1plBv8=' 'sha256-teD4SWNpuE7eh8Vr/ShSd3ns9tLK2XbdSNAzsC70Tzs='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://wkibeptktbnaddfynrwr.supabase.co https://dfpm-physics.github.io; connect-src 'self' https://wkibeptktbnaddfynrwr.supabase.co wss://wkibeptktbnaddfynrwr.supabase.co; font-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grade assignments · PREP</title>
+  <script>(function(){try{var s=localStorage.getItem('cp.theme');var m=s||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');if(m==='dark')document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();</script>
+  <link rel="stylesheet" href="../css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.119.0/dist/umd/supabase.js" integrity="sha384-uteMfOloLDGt042uDz+xHGF3ym63/WQ6rFq7murQRG8Ih7QrXGEGNtWd8688sb4O" crossorigin="anonymous"></script>
+  <script src="../js/config.js"></script>
+</head>
+<body>
+  <header id="topnav"></header><script src="../js/nav-shell.js"></script>
+  <main class="page-wide" id="main">
+    <div class="center-load"><span class="spinner"></span><span>Loading…</span></div>
+  </main>
+
+  <script type="module">
+    import { bootstrap } from '../js/auth.js';
+    import { renderNav } from '../js/nav.js';
+    import { initTheme } from '../js/theme.js';
+    import { db } from '../js/supabase.js';
+    import { esc, runPage, lastFirst, fmtDateTime, infoHTML } from '../js/util.js';
+    import * as P from '../js/faculty-entry-parse.js';
+    import * as E from '../js/faculty-entry.js';
+
+    const ctx = await bootstrap({ require: 'faculty' });
+    runPage(ctx, init);
+
+    let vm = null;            // what loadEntry returned
+    let listRows = null;      // what loadGradeList returned: one row per assignment, or null when that read failed
+    let listError = '';       // the plain sentence for a failed list read
+    let showFinished = false; // the list hides assignments with nothing waiting until asked
+    let fileText = '', fileName = '', formatChoice = '';   // the grade file on screen, and the person's correction of its format
+    let itemId = new URLSearchParams(location.search).get('i') || null;        // the assignment whose table is on screen; null shows the list
+    let sectionId = '';       // '' = all my sections
+    let busy = false;
+    let parsed = null;        // a read grade file
+    let mapping = {};         // file column key -> item
+    let importOpts = { skipUnmatched: false, allowPublished: false, acceptNameMatches: false, acceptMax: {} };
+    let note = null;          // { kind, text } shown above the table
+    let preview = null;       // what publishing the item on screen would do, from the database (publish_preview)
+    let previewToken = 0;     // only the newest answer is used
+    let typed = {};           // scores typed but not yet saved, kept across a re-draw so a failure never eats them
+
+    const $ = (id) => document.getElementById(id);
+    const isDirector = () => ctx.isDirectorForCurrent();
+    const item = () => vm?.items.find(i => i.id === itemId) || null;
+    const mine = () => (vm?.roster || []).filter(r => (r.status === 'active' || r.status === 'completed')
+      && (!sectionId || r.sectionId === sectionId))
+      .sort((a, b) => lastFirst(a.name).localeCompare(lastFirst(b.name)));
+
+    function init() {
+      initTheme();
+      renderNav(ctx, { active: 'entry', onCourseChange: () => { setItem(null); parsed = null; return load(); } });
+      // A file dropped anywhere else on the page must not make the browser leave the page and open the file.
+      const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+      window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+      window.addEventListener('drop', (e) => { if (hasFiles(e)) e.preventDefault(); });
+      return load();
+    }
+
+    const head = (extra = '') => `<div class="page-head"><div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <div><h1>Grade assignments${infoHTML('Scores typed in by staff or imported open a table here, where you can type them or drop in a file. Work that a person reads answer by answer opens the Grade page.', 'About this page')}</h1><div class="sub">${itemId && item() ? `Type or import scores for ${esc(item().title)}, in ${esc(ctx.courseTitleOf(ctx.currentOffering) || '')}.`
+        : `Pick an assignment that still needs grading, in ${esc(ctx.courseTitleOf(ctx.currentOffering) || '')}.`}</div></div>${extra}</div></div>`;
+
+    // Which assignment is open is kept in the address (?i=), so a reload or a shared link lands on the same table.
+    function setItem(id) {
+      itemId = id || null; note = null; parsed = null; fileText = ''; fileName = ''; formatChoice = '';
+      try { history.replaceState(null, '', itemId ? `?i=${encodeURIComponent(itemId)}` : location.pathname); } catch (e) { /* the address is a convenience */ }
+    }
+
+    async function load() {
+      const root = $('main');
+      if (!ctx.currentOffering) { root.innerHTML = head() + `<div class="alert alert-warn">No course access found.</div>`; return; }
+      root.innerHTML = head() + `<div class="center-load"><span class="spinner"></span><span>Loading…</span></div>`;
+      const [v, l] = await Promise.all([E.loadEntry(db, ctx.currentOffering), E.loadGradeList(db, ctx.currentOffering)]);
+      vm = v;
+      typed = {};
+      if (vm.error) {
+        console.error('entry load failed', vm.error);
+        root.innerHTML = head() + `<div class="alert alert-error">Could not load this page: ${esc(E.plainEntryError(vm.error))}</div>`;
+        return;
+      }
+      // A failed list read is shown as a failure in the list, never as an empty list. A table that loaded stays usable.
+      if (l.error) { console.error('grade list failed', l.error); listRows = null; listError = E.plainEntryError(l.error); }
+      else { listRows = l.items; listError = ''; }
+      if (itemId && !item()) setItem(null);
+      render();
+    }
+
+    function render() { return itemId ? renderTable() : renderList(); }
+
+    const UNSAVED_LOSE = 'You have scores typed that are not saved. Leave this assignment and lose them?';
+
+    /* ── The list: every assignment that still needs grading ───────────────── */
+    function renderList() {
+      const rows = listRows || [];
+      const shown = showFinished ? rows : rows.filter(r => !r.finished);
+      const open = (r) => r.opensWith === 'table'
+        ? `<button class="btn btn-primary btn-sm" data-open="${esc(r.id)}">Open the score table</button>`
+        : r.opensWith === 'review'
+          ? `<a class="btn btn-primary btn-sm" href="grade.html?a=${encodeURIComponent(r.id)}&amp;back=entry">Review answers</a>`
+          : `<span class="muted">Checked automatically</span>`;
+      // Typed-in work that also holds AI drafts has its drafts reviewed on the Grade page.
+      const review = (r) => r.alsoReview
+        ? ` <a class="btn btn-ghost btn-sm" href="grade.html?a=${encodeURIComponent(r.id)}&amp;back=entry">Review AI drafts</a>` : '';
+      const body = shown.map(r => `<tr>
+        <td><strong>${esc(r.title)}</strong></td>
+        <td>${r.dueAt ? esc(fmtDateTime(r.dueAt)) : '<span class="muted">no date</span>'}</td>
+        <td>${esc(r.howGraded)}</td>
+        <td>${r.finished ? '<span class="muted">Nothing waiting</span>' : E.waitingParts(r).map(t => `<div>${esc(t)}</div>`).join('')}</td>
+        <td style="white-space:nowrap">${open(r)}${review(r)}</td></tr>`).join('');
+      const table = listError ? '' : !rows.length
+        ? `<div class="empty-state"><div class="es-ic">✏️</div><h3>No assignments yet</h3><p>A Director adds assignments on the Assignments page.</p></div>`
+        : !shown.length
+          ? `<div class="alert alert-success">Nothing is waiting: no scores to enter, approve or review.</div>`
+          : `<div class="table-wrap"><table id="grade-list"><thead><tr><th>Assignment</th><th>Due</th><th>How it is graded</th><th>What is waiting</th><th></th></tr></thead><tbody>${body}</tbody></table></div>`;
+      $('main').innerHTML = head() + `
+        ${note ? `<div class="alert alert-${note.kind}" id="note">${esc(note.text)}</div>` : ''}
+        ${listError ? `<div class="alert alert-error">Could not load the list of assignments: ${esc(listError)}<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" id="list-retry">Try again</button></div></div>` : ''}
+        ${listError ? '' : `<label class="check-inline" style="margin-bottom:10px"><input type="checkbox" id="show-finished"${showFinished ? ' checked' : ''}> <span>Also show assignments with nothing waiting</span></label>`}
+        ${table}`;
+      document.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { setItem(b.dataset.open); render(); });
+      const sf = $('show-finished'); if (sf) sf.onchange = () => { showFinished = sf.checked; renderList(); };
+      const rt = $('list-retry'); if (rt) rt.onclick = () => { note = null; load(); };
+    }
+
+    /* ── The table for one assignment ───────────────────────────────────────── */
+    function renderTable() {
+      const it = item();
+      const rows = mine();
+      const secOpts = `<option value="">All my sections</option>` + vm.sections.map(s => `<option value="${esc(s.id)}"${s.id === sectionId ? ' selected' : ''}>${esc(s.code)}</option>`).join('');
+      const itemOpts = vm.items.map(i => `<option value="${esc(i.id)}"${i.id === itemId ? ' selected' : ''}>${esc(i.title)}${i.pointsCents != null ? ` (${P.centsText(i.pointsCents)} pts)` : ''}${i.published ? '' : ' — not published to students'}</option>`).join('');
+      const closed = sectionId ? !!vm.closures[`${sectionId}|${itemId}`] : null;
+      const closedCodes = vm.sections.filter(s2 => vm.closures[`${s2.id}|${itemId}`]).map(s2 => s2.code);
+      const body = rows.map(r => {
+        const k = `${r.enrollmentId}|${itemId}`;
+        const g = vm.grades[k], x = vm.excused[k];
+        const sec = vm.sections.find(s => s.id === r.sectionId)?.code || '';
+        return `<tr data-e="${esc(r.enrollmentId)}"${x ? ' class="muted"' : ''}>
+          <td>${esc(lastFirst(r.name))}</td><td>${esc(sec)}</td>
+          <td>${g?.cents != null ? esc(P.centsText(g.cents)) : '<span class="muted">not entered</span>'}</td>
+          <td>${g?.cents == null ? '' : (g.finalized ? 'Published' : 'Draft')}</td>
+          <td><input class="score-in" type="text" inputmode="decimal" autocomplete="off" aria-label="Score for ${esc(lastFirst(r.name))}" style="width:90px" value="${esc(typed[r.enrollmentId] ?? '')}" ${x ? 'disabled' : ''}>
+              <span class="cell-err" style="color:var(--danger,#b00020);font-size:.85em"></span></td>
+          <td>${x ? `<span class="score-badge">Excused</span> <span class="muted">${esc(x.reason)}</span>${isDirector() ? ` <button class="btn btn-ghost btn-sm" data-unex="${esc(x.id)}">Remove</button>` : ''}`
+              : (isDirector() ? `<button class="btn btn-ghost btn-sm" data-ex="${esc(r.enrollmentId)}">Excuse</button>` : '')}</td></tr>`;
+      }).join('');
+      $('main').innerHTML = head() + `
+        <div style="margin-bottom:10px"><button class="btn btn-ghost btn-sm" id="back-btn">← Back to the list of assignments</button></div>
+        ${note ? `<div class="alert alert-${note.kind}" id="note">${esc(note.text)}</div>` : ''}
+        <div class="drop-target" id="drop-area">
+        <div class="row wrap" style="gap:14px;align-items:flex-end;margin-bottom:12px">
+          <div class="field" style="margin:0"><label for="f-item">Assignment</label><select id="f-item">${itemOpts}</select></div>
+          <div class="field" style="margin:0"><label for="f-sec">Section</label><select id="f-sec">${secOpts}</select></div>
+          <button class="btn btn-primary" id="save-btn">Save entered scores</button>
+          <button class="btn btn-ghost" id="pub-btn" disabled>Publish this column</button>
+          <button class="btn btn-ghost" id="unpub-btn" hidden>Unpublish this column</button>
+          ${closed != null && closed ? `<button class="btn btn-ghost" id="reopen-btn">Reopen column</button>` : ''}
+          <button class="btn btn-ghost" id="imp-btn">Import a file…</button>
+        </div>
+        <div class="field-hint" id="pub-info" style="margin-bottom:6px">Reading what publishing would do…</div>
+        <div class="field-hint" style="margin-bottom:10px">Scores are saved as drafts. Leave a box empty to change nothing. Tab or Enter moves down; pasting a list fills down. Publishing can be undone with "Unpublish this column". ${sectionId ? (closed ? 'This column is closed for this section.' : '') : (closedCodes.length ? `Closed for: ${esc(closedCodes.join(', '))}.` : '')}</div>
+        <div id="import-panel"></div>
+        ${rows.length ? `<div class="table-wrap"><table id="entry-table"><thead><tr><th>Cadet</th><th>Section</th><th>Score</th><th>State</th><th>New score</th><th>Excused</th></tr></thead><tbody>${body}</tbody></table></div>`
+          : `<div class="empty-state"><h3>No cadets</h3><p>No enrolled cadets in this selection.</p></div>`}
+        </div>`;
+      wire();
+      renderImport();
+      refreshPreview();
+    }
+
+    // The names behind the preview's blank list. The list itself is the database's; this only looks the names up.
+    function blankNames() {
+      const by = new Map((vm?.roster || []).map(r => [r.enrollmentId, lastFirst(r.name)]));
+      return (preview?.blankCadets || []).map(c => by.get(c.enrollment_id) || 'a cadet').sort((a, b) => a.localeCompare(b));
+    }
+
+    /* What publishing would do comes from the database, so this page holds no copy of the rule. */
+    async function refreshPreview() {
+      const tok = ++previewToken;
+      preview = null;
+      const res = await E.publishPreview(db, itemId, sectionId || null);
+      if (tok !== previewToken) return;
+      const info = $('pub-info'), pub = $('pub-btn'), un = $('unpub-btn');
+      if (!info || !pub) return;
+      if (res.error) {
+        info.textContent = `Could not read what publishing would do: ${E.plainEntryError(res.error)} Publishing is off until this loads.`;
+        info.style.color = 'var(--danger,#b00020)';
+        pub.disabled = true;
+        return;
+      }
+      preview = res.preview;
+      info.style.color = '';
+      if (!preview.itemPublished) {
+        info.textContent = 'This assignment is not published to students yet, so publishing its scores would show them nothing. Publish the assignment first. Publishing the column is off until then.';
+        pub.disabled = true;
+      } else if (!preview.handEntered) {
+        info.textContent = 'This assignment is not entered by hand or by import, so its scores are published from the grade page.';
+        pub.disabled = true;
+      } else {
+        const bits = [`${preview.drafts} drafted score(s) would be published`];
+        if (preview.heldAi) bits.push(`${preview.heldAi} AI-suggested draft(s) would be left out for a person to review on the grade page`);
+        bits.push(preview.closeApplies ? `the column would also close${preview.openSections ? ` for ${preview.openSections} section(s)` : ' (already closed)'}` : 'the column would stay open');
+        // The cadets who would drop to 0 come FIRST, with the number: that is the part of a publish that moves totals.
+        const lead = preview.blankCount
+          ? `${preview.blankCount} cadet(s) with no score would count as 0: ${blankNames().join(', ')}. ` : '';
+        const wait = preview.waitingCount ? `${preview.waitingCount} cadet(s) with an extension that has not passed keep waiting. ` : '';
+        info.textContent = `${lead}${wait}Publishing now: ${bits.join('; ')}. ${preview.live} score(s) are already published.`;
+        pub.disabled = preview.drafts === 0 && !preview.blankCount && !(preview.closeApplies && preview.openSections);
+      }
+      if (un) un.hidden = !(preview.handEntered && (preview.live > 0 || (sectionId ? !!vm.closures[`${sectionId}|${itemId}`] : false)));
+    }
+
+    function wire() {
+      $('back-btn').onclick = () => {
+        if (Object.keys(gridInputs()).length && !confirm(UNSAVED_LOSE)) return;
+        typed = {}; setItem(null); render();
+      };
+      $('f-item').onchange = (e) => {
+        // Typed scores belong to the assignment on screen. Switching without asking would drop them silently.
+        if (Object.keys(gridInputs()).length && !confirm(UNSAVED_LOSE)) { e.target.value = itemId; return; }
+        typed = {}; setItem(e.target.value); render();
+      };
+      // The whole table area takes a dropped file. The "Import a file" button below is the keyboard route.
+      const dz = $('drop-area');
+      let depth = 0;
+      const isFile = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+      dz.addEventListener('dragenter', (e) => { if (!isFile(e)) return; e.preventDefault(); depth++; dz.classList.add('drop-active'); });
+      dz.addEventListener('dragover', (e) => { if (isFile(e)) e.preventDefault(); });
+      dz.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) dz.classList.remove('drop-active'); });
+      dz.addEventListener('drop', (e) => {
+        if (!isFile(e)) return;
+        e.preventDefault(); depth = 0; dz.classList.remove('drop-active');
+        const f = e.dataTransfer.files?.[0];
+        if (f) takeFile(f);
+      });
+      $('f-sec').onchange = (e) => { sectionId = e.target.value; note = null; render(); };
+      $('save-btn').onclick = saveGrid;
+      $('pub-btn').onclick = publish;
+      $('unpub-btn').onclick = unpublish;
+      $('imp-btn').onclick = () => { if (!parsed) { fileText = ''; fileName = ''; formatChoice = ''; } parsed = parsed || { picking: true }; renderImport(); };
+      const re = $('reopen-btn'); if (re) re.onclick = reopen;
+      const inputs = [...document.querySelectorAll('.score-in')];
+      inputs.forEach((inp, i) => {
+        inp.addEventListener('input', () => { validateRow(inp); typed[inp.closest('tr').dataset.e] = inp.value; });
+        inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); (inputs[i + 1] || inp).focus(); } });
+        inp.addEventListener('paste', (ev) => {
+          const t = (ev.clipboardData || window.clipboardData).getData('text');
+          const lines = t.split(/\r?\n/).filter((l, n, a) => !(n === a.length - 1 && l === ''));
+          if (lines.length < 2) return;
+          ev.preventDefault();
+          lines.forEach((l, n) => { const target = inputs[i + n]; if (target && !target.disabled) { target.value = l.split('\t').pop().trim(); validateRow(target); typed[target.closest('tr').dataset.e] = target.value; } });
+        });
+      });
+      document.querySelectorAll('[data-ex]').forEach(b => b.onclick = () => doExcuse(b.dataset.ex));
+      document.querySelectorAll('[data-unex]').forEach(b => b.onclick = () => doUnexcuse(b.dataset.unex));
+    }
+
+    function validateRow(inp) {
+      const c = P.checkCell(inp.value, item());
+      inp.nextElementSibling.textContent = c.ok ? '' : c.reason;
+      return c.ok;
+    }
+
+    function gridInputs() {
+      const out = {};
+      document.querySelectorAll('#entry-table tbody tr').forEach(tr => {
+        const v = tr.querySelector('.score-in')?.value ?? '';
+        if (v.trim() !== '') out[tr.dataset.e] = v;
+      });
+      return out;
+    }
+
+    async function saveGrid() {
+      if (busy) return;
+      const r = P.buildEntryChanges({ item: item(), inputs: gridInputs(), existing: vm.grades });
+      typed = gridInputs();
+      if (r.errors.length) { note = { kind: 'error', text: `${r.errors.length} score(s) cannot be saved: ${r.errors[0].reason}. Nothing was saved.` }; render(); return; }
+      if (!r.changes.length) { note = { kind: 'info', text: r.same ? 'Every score typed is already entered. Nothing to save.' : 'Nothing typed. Nothing to save.' }; typed = {}; render(); return; }
+      const pubn = r.changes.filter(c => c.finalized).length;
+      if (pubn && !confirm(`${pubn} of these replace a score already published to students. Replace them?`)) return;
+      await write(r.changes, { source: 'instructor', allowPublished: pubn > 0 });
+    }
+
+    async function write(changes, opts) {
+      busy = true; $('save-btn') && ($('save-btn').disabled = true);
+      const res = await E.enterGrades(db, itemId, changes, opts);
+      busy = false;
+      if (res.error) { console.error('enter failed', res.error); note = { kind: 'error', text: E.plainEntryError(res.error) }; render(); return false; }
+      note = E.writeSummary(res);
+      parsed = null; typed = {};
+      await reloadKeep();
+      return true;
+    }
+
+    // After a write the page re-reads. The write has already happened, so a failed read is shown beside a success
+    // note, never instead of it, and no stale table is drawn.
+    async function reloadKeep() {
+      const keepItem = itemId, keepSec = sectionId;
+      const [fresh, freshList] = await Promise.all([E.loadEntry(db, ctx.currentOffering), E.loadGradeList(db, ctx.currentOffering)]);
+      // The counts on the list move with a write, so they are read again. A failed re-read is shown on the list, not hidden.
+      if (freshList.error) { console.error('grade list reload failed', freshList.error); listRows = null; listError = E.plainEntryError(freshList.error); }
+      else { listRows = freshList.items; listError = ''; }
+      const after = E.afterWrite(note, fresh);
+      if (!after.vm) {
+        console.error('reload after a write failed', fresh.error);
+        vm = null;
+        $('main').innerHTML = head() + after.banners.map(b => `<div class="alert alert-${b.kind}">${esc(b.text)}</div>`).join('')
+          + `<button class="btn btn-primary" id="reload-btn">Reload</button>`;
+        $('reload-btn').onclick = () => { note = null; load(); };
+        return;
+      }
+      vm = after.vm; itemId = keepItem; sectionId = keepSec; render();
+    }
+
+    async function publish() {
+      if (busy || !preview) return;
+      if (Object.keys(gridInputs()).length) { typed = gridInputs(); note = { kind: 'warn', text: 'You have scores typed that are not saved. Save them first, or clear them, then publish.' }; render(); return; }
+      const it = item();
+      const where = sectionId ? 'this section' : 'all your sections';
+      const lines = [`Publish the drafted scores of "${it.title}" for ${where}?`, ''];
+      if (preview.blankCount) lines.push(`${preview.blankCount} cadet(s) with no score will count as 0:`, blankNames().join(', '), '');
+      if (preview.waitingCount) lines.push(`${preview.waitingCount} cadet(s) with an extension that has not passed keep waiting.`, '');
+      lines.push(`${preview.drafts} score(s) become visible to students.`);
+      if (preview.heldAi) lines.push(`${preview.heldAi} AI-suggested draft(s) are NOT published; a person reviews those on the grade page.`);
+      lines.push(preview.closeApplies ? 'The column also closes for the section, so any blank counts as 0.' : 'The column stays open.');
+      lines.push('', 'You can undo this with "Unpublish this column"; that reopens only the columns this publish closed.');
+      if (!confirm(lines.join('\n'))) return;
+      busy = true;
+      const res = await E.publishColumn(db, itemId, sectionId || null, preview.fingerprint);
+      busy = false;
+      if (res.error) { note = { kind: 'error', text: E.plainEntryError(res.error) }; render(); return; }
+      note = E.publishSummary(res);
+      await reloadKeep();
+    }
+
+    async function unpublish() {
+      if (busy || !preview) return;
+      if (Object.keys(gridInputs()).length) { typed = gridInputs(); note = { kind: 'warn', text: 'You have scores typed that are not saved. Save them first, or clear them, then unpublish.' }; render(); return; }
+      const it = item();
+      const where = sectionId ? 'this section' : 'all your sections';
+      if (!confirm(`Unpublish the scores of "${it.title}" for ${where}?\n\n${preview.live} published score(s) go back to drafts and leave students' totals. Columns this publish closed reopen, so their blanks stop counting as 0. A column closed any other way stays closed.`)) return;
+      busy = true;
+      const res = await E.unpublishColumn(db, itemId, sectionId || null, true);
+      busy = false;
+      if (res.error) { note = { kind: 'error', text: E.plainEntryError(res.error) }; render(); return; }
+      note = res.unpublished || res.reopened
+        ? { kind: 'success', text: `Unpublished ${res.unpublished} score(s); reopened ${res.reopened} section column(s).${res.keptClosed ? ` ${res.keptClosed} column(s) closed another way stay closed.` : ''}` }
+        : { kind: 'info', text: 'Nothing to unpublish: no score was published and no column was closed.' };
+      await reloadKeep();
+    }
+
+    async function reopen() {
+      const id = vm.closures[`${sectionId}|${itemId}`];
+      if (!id || !confirm('Reopen this column? Blanks stop counting as 0 until it is closed again.')) return;
+      const res = await E.reopenColumn(db, id);
+      note = res.error ? { kind: 'error', text: E.plainEntryError(res.error) } : { kind: 'success', text: 'Column reopened.' };
+      if (res.error) { render(); return; }
+      await reloadKeep();
+    }
+
+    async function doExcuse(enrollmentId) {
+      const reason = prompt('Why is this cadet excused from this assignment? A reason is required and is logged with your name.');
+      if (reason == null) return;
+      const res = await E.excuse(db, enrollmentId, itemId, reason);
+      note = res.error ? { kind: 'error', text: E.plainEntryError(res.error) } : { kind: 'success', text: 'Excused. The assignment no longer counts in this cadet\'s total.' };
+      if (res.error) { render(); return; }
+      await reloadKeep();
+    }
+    async function doUnexcuse(id) {
+      const reason = prompt('Why is the excusal being removed? A reason is required and is logged.');
+      if (reason == null) return;
+      const res = await E.revokeExcusal(db, id, reason);
+      note = res.error ? { kind: 'error', text: E.plainEntryError(res.error) } : { kind: 'success', text: 'Excusal removed.' };
+      if (res.error) { render(); return; }
+      await reloadKeep();
+    }
+
+    /* ── Import ─────────────────────────────────────────────────────────── */
+
+    // A file arrives by drop or by the Choose button. Its text is kept so the person can correct the format and read it again.
+    async function takeFile(f) {
+      if (busy) return;
+      let text;
+      try { text = await f.text(); } catch (e) { console.error('could not read the file', e); fileText = ''; parsed = { picking: true, error: 'That file could not be read.' }; renderImport(); return; }
+      fileText = text; fileName = f.name || ''; formatChoice = '';
+      readFile();
+    }
+
+    function readFile() {
+      const p = P.parseGradeFile(fileText, formatChoice ? { format: formatChoice } : {});
+      if (p.error) { parsed = { picking: true, error: p.error }; renderImport(); return; }
+      parsed = p; mapping = {};
+      p.columns.forEach(c => { const g = p.singleColumn ? item() : P.guessItem(c.name, vm.items); if (g) mapping[c.key] = g; });
+      importOpts = { skipUnmatched: false, allowPublished: false, acceptNameMatches: false, acceptMax: {} };
+      renderImport();
+    }
+
+    // The format the file was recognised as, and the way to say it is a different one.
+    function formatPicker() {
+      const seen = parsed && !parsed.picking ? P.formatFamily(parsed.format) : '';
+      const cur = formatChoice || seen || '';
+      const opts = [{ id: '', label: 'Work it out from the file' }, ...P.FORMAT_CHOICES]
+        .map(f => `<option value="${esc(f.id)}"${f.id === cur || (!cur && f.id === '') ? ' selected' : ''}>${esc(f.label)}</option>`).join('');
+      return `<div class="row wrap" style="gap:10px;align-items:center;margin:8px 0"><label for="imp-format"><strong>File format</strong></label>
+        <select id="imp-format">${opts}</select>
+        <span class="field-hint" style="margin:0">${seen && !formatChoice ? `Recognised as ${esc(P.formatLabel(parsed.format))}. Change it if that is wrong.` : seen ? '' : 'If the file is read as the wrong kind, choose the right one here.'}</span></div>`;
+    }
+    function wireFormatPicker() {
+      const s = $('imp-format'); if (!s) return;
+      s.onchange = () => { formatChoice = s.value; readFile(); };
+    }
+
+    function renderImport() {
+      const box = $('import-panel');
+      if (!box) return;
+      if (!parsed) { box.innerHTML = ''; return; }
+      if (parsed.picking) {
+        box.innerHTML = `<div class="card" style="padding:14px;margin-bottom:14px"><strong>Add scores from a grade file</strong>
+          <div class="field-hint">Drop a WebAssign, Teams or Gradescope grade file (.csv) anywhere on this table, or choose one. In Teams, export to Excel and save as CSV first. Nothing changes until you review the plan and confirm.</div>
+          ${parsed.error ? `<div class="alert alert-error" style="margin-top:8px" id="imp-error">${esc(parsed.error)}</div>` : ''}
+          ${fileText ? formatPicker() : ''}
+          <div class="dropzone" id="imp-dz" role="button" tabindex="0" style="min-height:70px;margin:10px 0"><div><strong>Drop a file here</strong>${fileName ? ` (last one: ${esc(fileName)})` : ''}</div></div>
+          <button class="btn btn-primary btn-sm" id="imp-pick">Choose a file…</button>
+          <input type="file" id="imp-file" aria-label="Grade file" accept=".csv,.txt,text/csv" style="display:none"> <button class="btn btn-ghost btn-sm" id="imp-cancel">Cancel</button></div>`;
+        $('imp-cancel').onclick = () => { parsed = null; fileText = ''; fileName = ''; formatChoice = ''; renderImport(); };
+        $('imp-pick').onclick = () => $('imp-file').click();
+        $('imp-dz').onclick = () => $('imp-file').click();
+        $('imp-dz').onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('imp-file').click(); } };
+        $('imp-file').onchange = (e) => { const f = e.target.files[0]; if (f) takeFile(f); };
+        wireFormatPicker();
+        return;
+      }
+      const plan = P.buildImportPlan({ parsed, mapping, roster: vm.roster, existing: vm.grades, options: importOpts });
+      const colRows = parsed.columns.map(c => `<tr><td>${esc(c.name)}${c.maxCents != null ? ` <span class="muted">(out of ${P.centsText(c.maxCents)})</span>` : ''}${c.dueText ? ` <span class="muted">due ${esc(c.dueText)}</span>` : ''}</td>
+        <td><select data-col="${esc(c.key)}"><option value="">Do not import</option>${vm.items.map(i => `<option value="${esc(i.id)}"${mapping[c.key]?.id === i.id ? ' selected' : ''}>${esc(i.title)}</option>`).join('')}</select></td></tr>`).join('');
+      const list = (a) => a.map(x => `<li>${esc(x)}</li>`).join('');
+      const chg = plan.changes.slice(0, 200).map(c => `<tr><td>${esc(c.name)}</td><td>${esc(vm.items.find(i => i.id === c.itemId)?.title || '')}</td>
+        <td>${c.old != null ? esc(P.centsText(c.old)) : '<span class="muted">none</span>'}</td><td><strong>${esc(P.centsText(c.cents))}</strong></td><td>${c.finalized ? 'replaces published' : c.kind}${c.method === 'name' ? ' · matched by name' : ''}</td></tr>`).join('');
+      box.innerHTML = `<div class="card" style="padding:14px;margin-bottom:14px">
+        <div class="row" style="justify-content:space-between"><strong>Import preview${fileName ? ` · ${esc(fileName)}` : ''}</strong><button class="btn btn-ghost btn-sm" id="imp-cancel">Cancel</button></div>
+        ${formatPicker()}
+        <table style="margin:10px 0"><thead><tr><th>File column</th><th>Fills assignment</th></tr></thead><tbody>${colRows}</tbody></table>
+        <div class="field-hint">${plan.counts.rows} row(s) in the file, ${plan.counts.matched} matched to a cadet, ${plan.counts.unmatched} not matched. ${plan.counts.changes} score(s) would change, ${plan.same} already match.</div>
+        ${plan.blockers.length ? `<div class="alert alert-error"><strong>Fix the file first. Nothing has been changed.</strong><ul>${list(plan.blockers)}</ul></div>` : ''}
+        ${plan.duplicates.length ? `<div class="alert alert-error"><ul>${plan.duplicates.map(d => `<li>${esc(d.name)}: lines ${d.rowNos.join(', ')}</li>`).join('')}</ul></div>` : ''}
+        ${plan.held.length ? `<div class="alert alert-warn"><ul>${list(plan.held)}</ul>
+           ${plan.unmatched.length ? `<label class="check-inline"><input type="checkbox" id="opt-skip"${importOpts.skipUnmatched ? ' checked' : ''}> <span>Skip the ${plan.unmatched.length} unmatched row(s)</span></label>` : ''}
+           ${plan.nameMatched.length ? `<label class="check-inline"><input type="checkbox" id="opt-name"${importOpts.acceptNameMatches ? ' checked' : ''}> <span>Accept the ${plan.nameMatched.length} row(s) matched by name alone</span></label>` : ''}
+           ${plan.maxMismatch.map(mm => `<label class="check-inline"><input type="checkbox" data-max="${esc(mm.key)}"${importOpts.acceptMax[mm.key] === mm.token ? ' checked' : ''}> <span>Import "${esc(mm.name)}" as written, although it is out of ${esc(mm.fileMaxList.map(P.centsText).join(' and '))} and the assignment is worth ${P.centsText(mm.itemPointsCents)}</span></label>`).join('')}
+           ${plan.changes.some(c => c.finalized) ? `<label class="check-inline"><input type="checkbox" id="opt-pub"${importOpts.allowPublished === plan.overwritesPublished ? ' checked' : ''}> <span>Allow replacing ${plan.overwritesPublished} published score(s)</span></label>` : ''}</div>` : ''}
+        ${plan.unmatched.length ? `<details><summary>${plan.unmatched.length} unmatched row(s)</summary><ul>${plan.unmatched.map(u => `<li>Line ${u.rowNo}: ${esc(u.name)} (${esc(u.reason)})</li>`).join('')}</ul></details>` : ''}
+        ${plan.notes.length ? `<div class="alert alert-info"><ul>${list(plan.notes)}</ul></div>` : ''}
+        ${plan.changes.length ? `<div class="table-wrap" style="max-height:320px;overflow:auto"><table><thead><tr><th>Cadet</th><th>Assignment</th><th>Now</th><th>New</th><th></th></tr></thead><tbody>${chg}</tbody></table></div>${plan.changes.length > 200 ? `<div class="field-hint">Showing the first 200 of ${plan.changes.length}.</div>` : ''}` : ''}
+        <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn btn-primary" id="imp-apply"${plan.canApply ? '' : ' disabled'}>Import ${plan.changes.length} score(s)</button></div></div>`;
+      $('imp-cancel').onclick = () => { parsed = null; fileText = ''; fileName = ''; formatChoice = ''; renderImport(); };
+      wireFormatPicker();
+      box.querySelectorAll('[data-col]').forEach(s => s.onchange = () => { const it = vm.items.find(i => i.id === s.value); if (it) mapping[s.dataset.col] = it; else delete mapping[s.dataset.col];
+        // A tick belongs to the mapping it was given under. Changing a column clears them, so nothing is approved that was not shown.
+        importOpts.allowPublished = false; importOpts.acceptMax = {}; renderImport(); });
+      const sk = $('opt-skip'); if (sk) sk.onchange = () => { importOpts.skipUnmatched = sk.checked; renderImport(); };
+      const pb = $('opt-pub'); if (pb) pb.onchange = () => { importOpts.allowPublished = pb.checked ? plan.overwritesPublished : false; renderImport(); };
+      const nm = $('opt-name'); if (nm) nm.onchange = () => { importOpts.acceptNameMatches = nm.checked; renderImport(); };
+      box.querySelectorAll('[data-max]').forEach(c => c.onchange = () => { importOpts.acceptMax[c.dataset.max] = c.checked ? plan.maxMismatch.find(m => m.key === c.dataset.max)?.token : ''; renderImport(); });
+      $('imp-apply').onclick = async () => {
+        if (busy || !plan.canApply) return;
+        // One call per item: each is all-or-nothing, and an item that fails is named.
+        const byItem = new Map();
+        plan.changes.forEach(c => (byItem.get(c.itemId) || byItem.set(c.itemId, []).get(c.itemId)).push(c));
+        busy = true; let done = 0, saved = 0, replaced = 0;
+        for (const [iid, list2] of byItem) {
+          const res = await E.enterGrades(db, iid, list2, { source: 'imported', allowPublished: plan.overwritesPublished > 0 });
+          if (res.error) {
+            busy = false;
+            note = { kind: 'error', text: `${E.plainEntryError(res.error)} ${done ? `${done} assignment(s) were already saved before this one.` : 'Nothing was saved.'}` };
+            if (done) await reloadKeep(); else render();
+            return;
+          }
+          done += 1; saved += res.saved; replaced += res.replacedPublished;
+        }
+        busy = false; parsed = null; fileText = ''; fileName = ''; formatChoice = '';
+        const w = E.writeSummary({ saved, replacedPublished: replaced });
+        note = { kind: w.kind, text: `Imported. ${w.text}${replaced ? '' : ' Review them, then publish the column.'}` };
+        await reloadKeep();
+      };
+    }
+  </script>
+</body>
+</html>
